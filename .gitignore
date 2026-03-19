@@ -1,0 +1,13 @@
+.claude/
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+backend/venv/
+backend/.env
+
+# Local frontend dependencies/build output are already covered by frontend/.gitignore,
+# but keeping the most important entries here helps before the first commit.
+frontend/node_modules/
+frontend/.next/

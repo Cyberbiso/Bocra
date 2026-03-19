@@ -2,7 +2,8 @@
 
 import InnerPageLayout from "@/components/InnerPageLayout";
 import { motion } from "framer-motion";
-import { Quote, Mail, Phone, Linkedin } from "lucide-react";
+import { Quote, Mail, Phone } from "lucide-react";
+import Image from "next/image";
 
 const SIDEBAR_LINKS = [
   { label: "Profile", href: "/about/profile" },
@@ -34,10 +35,26 @@ export default function ChiefExecutivePage() {
         <div className="h-2 bg-gradient-to-r from-[#06193e] via-[#027ac6] to-[#75AADB]" />
         <div className="p-7 md:p-9">
           <div className="flex flex-col md:flex-row gap-7 items-start">
-            {/* Avatar placeholder */}
+            {/* Portrait */}
             <div className="shrink-0">
-              <div className="w-28 h-28 rounded-2xl bg-[#06193e] flex items-center justify-center shadow-lg shadow-[#06193e]/20">
-                <span className="text-4xl font-black text-[#75AADB]">MM</span>
+              <div className="relative w-36 h-44 md:w-44 md:h-56 rounded-[1.75rem] overflow-hidden shadow-xl shadow-[#06193e]/20 border border-[#75AADB]/20">
+                <Image
+                  src="/people/mokgware.jpg"
+                  alt="Martin Mokgware"
+                  fill
+                  className="object-cover"
+                  style={{ objectPosition: "center 10%" }}
+                  sizes="(max-width: 768px) 144px, 176px"
+                />
+                <div className="absolute inset-0 bg-linear-to-t from-[#06193e]/55 via-transparent to-transparent" />
+                <div className="absolute left-3 right-3 bottom-3 rounded-2xl bg-white/92 backdrop-blur px-3 py-2 shadow-lg">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#D4921A]">
+                    BOCRA
+                  </p>
+                  <p className="text-[#06193e] text-sm font-black leading-tight">
+                    Martin Mokgware
+                  </p>
+                </div>
               </div>
               <div className="mt-3 text-center">
                 <p className="text-xs font-bold text-[#027ac6]">Chief Executive Officer</p>
@@ -58,7 +75,7 @@ export default function ChiefExecutivePage() {
                 oversight to the Authority in the execution of its mandate to regulate
                 Botswana&rsquo;s communications sector.
               </p>
-              <div className="flex items-center gap-4 mt-5">
+              <div className="flex flex-wrap items-center gap-4 mt-5">
                 <a
                   href="mailto:info@bocra.org.bw"
                   className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-[#027ac6] transition-colors"

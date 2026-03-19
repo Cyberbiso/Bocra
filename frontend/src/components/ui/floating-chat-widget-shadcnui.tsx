@@ -1,17 +1,17 @@
 "use client";
 
+import { MessageLoading } from "@/components/ui/message-loading";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import {
   Bot,
-  Loader2,
   MessageSquare,
   Send,
   ShieldCheck,
   User,
   X,
 } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, Fragment, useEffect, useRef, useState } from "react";
 
 type Message = {
   id: string;
@@ -60,6 +60,113 @@ const MESSAGE_VARIANTS: Variants = {
   },
 };
 
+type MessageBlock =
+  | { type: "paragraph"; text: string }
+  | { type: "list"; items: string[] };
+
+function parseMessageBlocks(content: string): MessageBlock[] {
+  const blocks: MessageBlock[] = [];
+  const paragraphLines: string[] = [];
+  let listItems: string[] = [];
+
+  function flushParagraph() {
+    if (paragraphLines.length === 0) return;
+    blocks.push({
+      type: "paragraph",
+      text: paragraphLines.join(" ").trim(),
+    });
+    paragraphLines.length = 0;
+  }
+
+  function flushList() {
+    if (listItems.length === 0) return;
+    blocks.push({
+      type: "list",
+      items: [...listItems],
+    });
+    listItems = [];
+  }
+
+  for (const rawLine of content.replace(/\r/g, "").split("\n")) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      flushParagraph();
+      listItems.push(line.replace(/^[-*]\s+/, "").trim());
+      continue;
+    }
+
+    flushList();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+
+  return blocks.length > 0 ? blocks : [{ type: "paragraph", text: content }];
+}
+
+function renderInlineFormatting(text: string) {
+  return text
+    .split(/(\*\*[^*]+\*\*)/g)
+    .filter(Boolean)
+    .map((part, index) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={`${part}-${index}`} className="font-semibold">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+
+      return <Fragment key={`${part}-${index}`}>{part}</Fragment>;
+    });
+}
+
+function FormattedMessage({
+  content,
+  role,
+}: {
+  content: string;
+  role: Message["role"];
+}) {
+  const blocks = parseMessageBlocks(content);
+
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, index) => {
+        if (block.type === "list") {
+          return (
+            <ul
+              key={`list-${index}`}
+              className={cn(
+                "space-y-2 pl-5",
+                role === "user" ? "list-disc marker:text-white/80" : "list-disc marker:text-[#027ac6]",
+              )}
+            >
+              {block.items.map((item, itemIndex) => (
+                <li key={`item-${itemIndex}`}>{renderInlineFormatting(item)}</li>
+              ))}
+            </ul>
+          );
+        }
+
+        return (
+          <p key={`paragraph-${index}`} className="whitespace-pre-wrap">
+            {renderInlineFormatting(block.text)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export function FloatingChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -73,6 +180,8 @@ export function FloatingChatWidget() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const hasUserMessages = messages.some((message) => message.role === "user");
+  const showQuickPrompts = !hasUserMessages && input.trim().length === 0;
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -215,7 +324,7 @@ export function FloatingChatWidget() {
                       className="flex items-end justify-end gap-3"
                     >
                       <div className="max-w-[82%] rounded-[1.5rem] rounded-br-md bg-[#027ac6] px-4 py-3 text-sm leading-relaxed text-white shadow-sm">
-                        {message.content}
+                        <FormattedMessage content={message.content} role={message.role} />
                       </div>
 
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white shadow-sm">
@@ -239,11 +348,11 @@ export function FloatingChatWidget() {
                       </div>
 
                       <div className="max-w-[82%] rounded-[1.5rem] rounded-bl-md border border-slate-200/80 bg-white/92 px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm">
-                        {message.content}
+                        <FormattedMessage content={message.content} role={message.role} />
                       </div>
                     </div>
 
-                    {isWelcome && (
+                    {isWelcome && showQuickPrompts && (
                       <div className="ml-12 flex flex-wrap gap-2">
                         {QUICK_PROMPTS.map((prompt) => (
                           <button
@@ -265,14 +374,13 @@ export function FloatingChatWidget() {
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="flex items-end gap-3"
+                  className="flex items-center gap-3"
                 >
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#75AADB]/20 bg-white shadow-sm">
                     <Bot className="h-4 w-4 text-[#06193e]" />
                   </div>
-                  <div className="flex items-center gap-2 rounded-[1.5rem] rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-slate-500 shadow-sm">
-                    <Loader2 className="h-4 w-4 animate-spin text-[#027ac6]" />
-                    <span className="text-sm">Thinking…</span>
+                  <div className="rounded-[1.5rem] rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-[#027ac6] shadow-sm">
+                    <MessageLoading />
                   </div>
                 </motion.div>
               )}

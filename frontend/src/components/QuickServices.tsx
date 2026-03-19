@@ -33,7 +33,7 @@ export default function QuickServices() {
                 <span className="inline-block w-6 h-0.5 bg-[#75AADB]" />
                 Citizen Services
               </p>
-              <h2 className="text-4xl font-black text-white font-[family-name:var(--font-outfit)] leading-tight">
+              <h2 className="text-4xl font-black text-white font-(family-name:--font-outfit) leading-tight">
                 What can we
                 <br />
                 <span className="text-[#75AADB]">help you with?</span>
@@ -61,7 +61,7 @@ export default function QuickServices() {
             className="lg:col-span-5 group"
           >
             <a href="#complaints" className="block h-full">
-              <div className="relative h-full min-h-[280px] bg-[#872030] rounded-2xl p-8 overflow-hidden flex flex-col justify-between">
+              <div className="relative h-full min-h-70 bg-[#872030] rounded-2xl p-8 overflow-hidden flex flex-col justify-between">
                 {/* Background texture */}
                 <div
                   className="absolute inset-0 opacity-10"
@@ -79,7 +79,7 @@ export default function QuickServices() {
                   <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-6">
                     <MessageCircle className="w-6 h-6 text-white" />
                   </div>
-                  <h3 className="text-2xl font-black text-white mb-3 font-[family-name:var(--font-outfit)]">
+                  <h3 className="text-2xl font-black text-white mb-3 font-(family-name:--font-outfit)">
                     File a Complaint
                   </h3>
                   <p className="text-red-100 text-sm leading-relaxed max-w-xs">
@@ -117,7 +117,7 @@ export default function QuickServices() {
                 rel="noopener noreferrer"
                 className="block h-full"
               >
-                <div className="h-full min-h-[130px] bg-[#06193e] rounded-2xl p-6 flex flex-col justify-between group-hover:bg-[#0d2a5e] transition-colors">
+                <div className="h-full min-h-32.5 bg-[#06193e] rounded-2xl p-6 flex flex-col justify-between group-hover:bg-[#0d2a5e] transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="w-10 h-10 bg-[#75AADB]/20 rounded-lg flex items-center justify-center">
                       <BookOpen className="w-5 h-5 text-[#75AADB]" />
@@ -144,7 +144,7 @@ export default function QuickServices() {
                 href="/services/licence-verification"
                 className="block h-full"
               >
-                <div className="h-full min-h-[130px] bg-[#1C6B3C] rounded-2xl p-6 flex flex-col justify-between group-hover:bg-[#175730] transition-colors">
+                <div className="h-full min-h-32.5 bg-[#1C6B3C] rounded-2xl p-6 flex flex-col justify-between group-hover:bg-[#175730] transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="w-10 h-10 bg-white/15 rounded-lg flex items-center justify-center">
                       <ShieldCheck className="w-5 h-5 text-white" />
@@ -168,7 +168,7 @@ export default function QuickServices() {
               className="group"
             >
               <a href="/services/type-approval" className="block h-full">
-                <div className="h-full min-h-[130px] bg-violet-950 rounded-2xl p-6 flex flex-col justify-between group-hover:bg-violet-900 transition-colors">
+                <div className="h-full min-h-32.5 bg-violet-950 rounded-2xl p-6 flex flex-col justify-between group-hover:bg-violet-900 transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="w-10 h-10 bg-violet-400/20 rounded-lg flex items-center justify-center">
                       <Smartphone className="w-5 h-5 text-violet-400" />
@@ -192,7 +192,7 @@ export default function QuickServices() {
               className="group"
             >
               <a href="#statistics" className="block h-full">
-                <div className="h-full min-h-[130px] bg-[#D4921A] rounded-2xl p-6 flex flex-col justify-between group-hover:bg-[#bc7f16] transition-colors">
+                <div className="h-full min-h-32.5 bg-[#D4921A] rounded-2xl p-6 flex flex-col justify-between group-hover:bg-[#bc7f16] transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="w-10 h-10 bg-black/15 rounded-lg flex items-center justify-center">
                       <BarChart2 className="w-5 h-5 text-[#06193e]" />

@@ -303,7 +303,7 @@ export default function Hero() {
     <div className="relative min-h-screen bg-[#03102A] overflow-hidden flex flex-col">
 
       {/* Botswana flag stripe */}
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#75AADB] via-[#ffffff] to-[#75AADB] opacity-60" />
+      <div className="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-[#75AADB] via-[#ffffff] to-[#75AADB] opacity-60" />
       <div className="absolute top-1 left-0 right-0 h-0.5 bg-black opacity-40" />
 
       {/* Background dot grid */}
@@ -317,13 +317,13 @@ export default function Hero() {
 
       {/* Diagonal accent */}
       <div
-        className="absolute top-0 right-0 w-[55%] h-full bg-gradient-to-bl from-[#06193e] to-transparent opacity-70 pointer-events-none"
+        className="absolute top-0 right-0 w-[55%] h-full bg-linear-to-bl from-[#06193e] to-transparent opacity-70 pointer-events-none"
         style={{ clipPath: "polygon(25% 0, 100% 0, 100% 100%, 0% 100%)" }}
       />
 
       {/* Atmospheric glows */}
-      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[#75AADB] rounded-full blur-[180px] opacity-[0.04] pointer-events-none" />
-      <div className="absolute top-10 right-10 w-[400px] h-[400px] bg-[#027ac6] rounded-full blur-[140px] opacity-[0.07] pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-150 h-150 bg-[#75AADB] rounded-full blur-[180px] opacity-[0.04] pointer-events-none" />
+      <div className="absolute top-10 right-10 w-100 h-100 bg-[#027ac6] rounded-full blur-[140px] opacity-[0.07] pointer-events-none" />
 
       {/* Main content */}
       <div className="relative z-10 flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-32 pb-16 w-full">
@@ -347,7 +347,7 @@ export default function Hero() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.1 }}
-              className="text-5xl lg:text-6xl xl:text-7xl font-black text-white leading-[1.05] tracking-tight mb-6 font-[family-name:var(--font-outfit)]"
+              className="text-5xl lg:text-6xl xl:text-7xl font-black text-white leading-[1.05] tracking-tight mb-6 font-(family-name:--font-outfit)"
             >
               Connecting
               <br />
@@ -532,7 +532,7 @@ export default function Hero() {
       </div>
 
       {/* Bottom stat strip */}
-      <div className="relative z-10 border-t border-white/10 bg-white/[0.03] backdrop-blur-sm">
+      <div className="relative z-10 border-t border-white/10 bg-white/3 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-white/10">
             {STATS.map((stat, i) => (
@@ -543,7 +543,7 @@ export default function Hero() {
                 transition={{ delay: 0.8 + i * 0.1 }}
                 className="py-5 px-6 flex flex-col gap-1"
               >
-                <span className="text-2xl font-black text-white font-[family-name:var(--font-outfit)]">
+                <span className="text-2xl font-black text-white font-(family-name:--font-outfit)">
                   {stat.value}
                 </span>
                 <span className="text-xs text-gray-400 font-medium">{stat.label}</span>

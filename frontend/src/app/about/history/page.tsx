@@ -49,7 +49,7 @@ export default function HistoryPage() {
         {/* Timeline */}
         <div className="relative">
           {/* Vertical line */}
-          <div className="absolute left-[27px] top-8 bottom-8 w-0.5 bg-gradient-to-b from-[#06193e] via-[#027ac6] to-[#75AADB]" />
+          <div className="absolute left-6.75 top-8 bottom-8 w-0.5 bg-linear-to-b from-[#06193e] via-[#027ac6] to-[#75AADB]" />
 
           <div className="space-y-4">
             {TIMELINE.map((event, i) => (

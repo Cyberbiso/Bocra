@@ -536,9 +536,9 @@ export function FloatingChatWidget() {
             initial="hidden"
             animate="visible"
             exit="exit"
-            className="w-[min(88vw,21rem)] overflow-hidden rounded-[2rem] border border-white/55 bg-white/88 shadow-[0_28px_80px_-24px_rgba(6,25,62,0.55)] backdrop-blur-2xl"
+            className="w-[min(88vw,21rem)] overflow-hidden rounded-4xl border border-white/55 bg-white/88 shadow-[0_28px_80px_-24px_rgba(6,25,62,0.55)] backdrop-blur-2xl"
           >
-            <div className="relative overflow-hidden border-b border-slate-200/70 bg-[radial-gradient(circle_at_top_left,_rgba(117,170,219,0.45),_transparent_42%),linear-gradient(135deg,_rgba(6,25,62,0.98),_rgba(2,122,198,0.95))] p-5 text-white">
+            <div className="relative overflow-hidden border-b border-slate-200/70 bg-[radial-gradient(circle_at_top_left,rgba(117,170,219,0.45),transparent_42%),linear-gradient(135deg,rgba(6,25,62,0.98),rgba(2,122,198,0.95))] p-5 text-white">
               <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/10 blur-2xl" />
               <div className="absolute bottom-0 left-0 h-24 w-24 rounded-full bg-[#D4921A]/15 blur-2xl" />
               <div className="relative flex items-start justify-between gap-4">
@@ -577,7 +577,7 @@ export function FloatingChatWidget() {
 
             <div
               ref={scrollRef}
-              className="flex h-[18rem] flex-col gap-4 overflow-y-auto bg-[linear-gradient(180deg,_rgba(250,252,255,0.96),_rgba(237,245,255,0.76))] px-4 py-5"
+              className="flex h-72 flex-col gap-4 overflow-y-auto bg-[linear-gradient(180deg,rgba(250,252,255,0.96),rgba(237,245,255,0.76))] px-4 py-5"
             >
               {messages.map((message) => {
                 const isUser = message.role === "user";
@@ -592,7 +592,7 @@ export function FloatingChatWidget() {
                       animate="visible"
                       className="flex items-end justify-end gap-3"
                     >
-                      <div className="max-w-[82%] rounded-[1.5rem] rounded-br-md bg-[#027ac6] px-4 py-3 text-sm leading-relaxed text-white shadow-sm">
+                      <div className="max-w-[82%] rounded-3xl rounded-br-md bg-[#027ac6] px-4 py-3 text-sm leading-relaxed text-white shadow-sm">
                         <FormattedMessage content={message.content} role={message.role} />
                       </div>
 
@@ -616,7 +616,7 @@ export function FloatingChatWidget() {
                         <Bot className="h-4 w-4 text-[#06193e]" />
                       </div>
 
-                      <div className="max-w-[82%] rounded-[1.5rem] rounded-bl-md border border-slate-200/80 bg-white/92 px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm">
+                      <div className="max-w-[82%] rounded-3xl rounded-bl-md border border-slate-200/80 bg-white/92 px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm">
                         <FormattedMessage content={message.content} role={message.role} />
                       </div>
                     </div>
@@ -648,7 +648,7 @@ export function FloatingChatWidget() {
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#75AADB]/20 bg-white shadow-sm">
                     <Bot className="h-4 w-4 text-[#06193e]" />
                   </div>
-                  <div className="rounded-[1.5rem] rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-[#027ac6] shadow-sm">
+                  <div className="rounded-3xl rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-[#027ac6] shadow-sm">
                     <MessageLoading />
                   </div>
                 </motion.div>
@@ -872,7 +872,7 @@ export function FloatingChatWidget() {
           "group relative flex h-16 w-16 items-center justify-center rounded-full border border-white/20 shadow-[0_22px_55px_-18px_rgba(6,25,62,0.65)] transition-all duration-300",
           isOpen
             ? "bg-[#872030] text-white"
-            : "bg-[linear-gradient(135deg,_#06193e,_#027ac6)] text-white",
+            : "bg-[linear-gradient(135deg,#06193e,#027ac6)] text-white",
         )}
         aria-label={isOpen ? "Close chat" : "Open chat"}
       >

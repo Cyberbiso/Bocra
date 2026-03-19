@@ -133,7 +133,7 @@ export default function BroadcastingPage() {
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.5 }}
-        className="bg-gradient-to-r from-[#06193e] to-[#027ac6] rounded-2xl p-6 mb-8 text-white"
+        className="bg-linear-to-r from-[#06193e] to-[#027ac6] rounded-2xl p-6 mb-8 text-white"
       >
         <div className="flex items-start gap-4">
           <Star className="w-7 h-7 text-[#75AADB] shrink-0 mt-0.5" />

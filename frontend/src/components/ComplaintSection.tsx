@@ -259,7 +259,7 @@ export default function ComplaintSection() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: 0.05 }}
-              className="text-3xl font-bold text-[#06193e] font-[family-name:var(--font-outfit)] mb-4"
+              className="text-3xl font-bold text-[#06193e] font-(family-name:--font-outfit) mb-4"
             >
               File a Complaint
             </motion.h2>
@@ -634,7 +634,7 @@ export default function ComplaintSection() {
                     <p className="text-blue-200 text-sm font-medium mb-2">
                       Your Reference Number
                     </p>
-                    <p className="text-3xl font-black text-white tracking-widest font-[family-name:var(--font-outfit)]">
+                    <p className="text-3xl font-black text-white tracking-widest font-(family-name:--font-outfit)">
                       {refNumber}
                     </p>
                     <p className="text-blue-300 text-xs mt-2">

@@ -105,7 +105,7 @@ export default function StatsDashboard() {
               <span className="inline-block w-6 h-0.5 bg-[#027ac6]" />
               Market Intelligence
             </p>
-            <h2 className="text-4xl font-black text-[#06193e] font-[family-name:var(--font-outfit)] leading-tight">
+            <h2 className="text-4xl font-black text-[#06193e] font-(family-name:--font-outfit) leading-tight">
               Botswana Telecom
               <br />
               <span className="text-[#027ac6]">Statistics Dashboard</span>
@@ -167,7 +167,7 @@ export default function StatsDashboard() {
               <div className={`w-10 h-10 ${kpi.iconBg} rounded-xl flex items-center justify-center mb-5`}>
                 <kpi.icon className={`w-5 h-5 ${kpi.iconColor}`} />
               </div>
-              <p className={`text-4xl font-black ${kpi.textColor} font-[family-name:var(--font-outfit)] mb-1`}>
+              <p className={`text-4xl font-black ${kpi.textColor} font-(family-name:--font-outfit) mb-1`}>
                 {kpi.value}
               </p>
               <p className={`text-sm font-bold ${kpi.textColor} mb-1`}>{kpi.label}</p>
@@ -196,7 +196,7 @@ export default function StatsDashboard() {
                 +82.3%
               </div>
             </div>
-            <div className="h-[260px]">
+            <div className="h-65">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={areaData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
@@ -225,7 +225,7 @@ export default function StatsDashboard() {
           >
             <h3 className="font-black text-white text-lg mb-1">Mobile Market Share</h3>
             <p className="text-gray-400 text-sm mb-4">Subscriber share by operator</p>
-            <div className="h-[180px]">
+            <div className="h-45">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value" strokeWidth={0}>
@@ -273,7 +273,7 @@ export default function StatsDashboard() {
                 Full Report <ArrowUpRight className="w-4 h-4" />
               </a>
             </div>
-            <div className="h-[180px]">
+            <div className="h-45">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={barData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }} barSize={48}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />

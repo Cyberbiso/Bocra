@@ -128,7 +128,7 @@ export default function NewsSection() {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: 0.05 }}
-                  className="text-3xl font-bold text-[#06193e] font-[family-name:var(--font-outfit)]"
+                  className="text-3xl font-bold text-[#06193e] font-(family-name:--font-outfit)"
                 >
                   News & Announcements
                 </motion.h2>

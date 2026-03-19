@@ -1,50 +1,29 @@
-# BOCRA Modern Regulatory Platform (Hackathon Edition) 🇧🇼
+# BOCRA Backend API (Hackathon Branch)
 
-This is a full-stack modernization of the BOCRA website, featuring a Next.js frontend, a FastAPI backend, and Google Vertex AI integration.
+This branch contains the BOCRA backend API built with FastAPI, Pydantic, and Google Vertex AI integration.
 
-## 🚀 Quick Start (Running the Project)
+## Branch Purpose
 
-### 1. The Backend (FastAPI)
-The backend handles AI chat, statistics, and complaints.
+This is the backend-only branch of the project.
+For the combined full-stack version, use the `main` branch.
+For the UI-only version, use the `codex/frontend` branch.
+
+## Quick Start
 
 ```bash
 cd backend
-# Create virtual environment (if not done)
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install fastapi "uvicorn[standard]" google-cloud-aiplatform python-dotenv pydantic
-
-# Run the server
 python main.py
 ```
-*The API will be available at: http://localhost:8000*
-*Interactive Docs (Swagger): http://localhost:8000/docs*
 
-### 2. The Frontend (Next.js)
-The frontend is a modern, responsive dashboard built with Tailwind CSS and Framer Motion.
+The API will be available at `http://localhost:8000`.
+Swagger docs will be available at `http://localhost:8000/docs`.
 
-```bash
-cd frontend
-# Install dependencies
-npm install
+## Environment Variables
 
-# Start development server
-npm run dev
-```
-*The UI will be available at: http://localhost:3000*
-
----
-
-## 🏗️ Project Structure
-
-- **`/frontend`**: Next.js 15 (App Router), Tailwind CSS, Framer Motion, Recharts, Lucide Icons.
-- **`/backend`**: Python FastAPI, Pydantic, Vertex AI SDK.
-- **`/BOCRA_Website_Audit_Report.pdf`**: The original audit report reference.
-
-## 🤖 Vertex AI Configuration
-To enable the AI Assistant, create a `.env` file in the `/backend` directory:
+Create a `.env` file in `backend/` with:
 
 ```env
 GOOGLE_CLOUD_PROJECT=your-project-id
@@ -52,9 +31,16 @@ GOOGLE_CLOUD_LOCATION=us-central1
 GOOGLE_APPLICATION_CREDENTIALS=path/to/your/service-account.json
 ```
 
-## ✨ Key Features Implemented
-- **Dynamic Hero Section**: Modern, high-impact landing with instant search.
-- **Live Stats Dashboard**: Real-time charts for mobile market share and internet growth.
-- **Smart AI Chatbot**: Powered by Google Vertex AI (Gemini Flash).
-- **Responsive Navbar/Footer**: Replaces the outdated multi-row navigation from the audit.
-- **Dark Mode Support**: Context-aware styling throughout the app.
+## Included In This Branch
+
+- `backend/`: FastAPI service
+- `BOCRA_Website_Audit_Report.pdf`: audit reference
+- `bocra_website_audit_report.md`: audit notes
+
+## API Features
+
+- AI chat endpoint powered by Vertex AI
+- Complaint submission and tracking endpoints
+- Statistics endpoint
+- Tariff data endpoint
+- CORS enabled for frontend integration

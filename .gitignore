@@ -11,3 +11,6 @@ backend/.env
 # but keeping the most important entries here helps before the first commit.
 frontend/node_modules/
 frontend/.next/
+
+# Backend-only branch can safely ignore any local frontend leftovers.
+frontend/

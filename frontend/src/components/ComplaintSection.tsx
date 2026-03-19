@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { ChangeEvent, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle2,
@@ -17,6 +17,7 @@ import {
   Phone,
   Upload,
   Loader2,
+  X,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -73,8 +74,44 @@ const OPERATORS = [
   "Other / Unknown",
 ];
 
-function generateRef() {
-  return "BCR-" + new Date().getFullYear() + "-" + Math.floor(100000 + Math.random() * 900000);
+const MAX_ATTACHMENTS = 5;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_FILE_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".pdf",
+  ".doc",
+  ".docx",
+];
+const ALLOWED_FILE_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isAllowedFile(file: File) {
+  const lowerName = file.name.toLowerCase();
+
+  return (
+    file.type.startsWith("image/") ||
+    ALLOWED_FILE_MIME_TYPES.has(file.type) ||
+    ALLOWED_FILE_EXTENSIONS.some((extension) => lowerName.endsWith(extension))
+  );
+}
+
+function getFileKey(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
 }
 
 export default function ComplaintSection() {
@@ -87,20 +124,120 @@ export default function ComplaintSection() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [consentGiven, setConsentGiven] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [refNumber, setRefNumber] = useState("");
+  const [uploadError, setUploadError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [submittedAttachmentCount, setSubmittedAttachmentCount] = useState(0);
 
   const canStep2 = category !== "";
   const canStep3 = operator !== "" && subject.trim() !== "" && description.trim().length >= 20;
-  const canStep4 = name.trim() !== "" && email.trim().includes("@") && phone.trim() !== "";
+  const canSubmitComplaint =
+    name.trim() !== "" && email.trim().includes("@") && phone.trim() !== "" && consentGiven;
+
+  function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files ?? []);
+
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    const nextFiles = [...attachments];
+    const errors: string[] = [];
+
+    for (const file of selectedFiles) {
+      if (!isAllowedFile(file)) {
+        errors.push(`${file.name} is not a supported file type.`);
+        continue;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        errors.push(`${file.name} exceeds the 10 MB upload limit.`);
+        continue;
+      }
+
+      if (nextFiles.some((existingFile) => getFileKey(existingFile) === getFileKey(file))) {
+        continue;
+      }
+
+      if (nextFiles.length >= MAX_ATTACHMENTS) {
+        errors.push(`You can attach up to ${MAX_ATTACHMENTS} files.`);
+        break;
+      }
+
+      nextFiles.push(file);
+    }
+
+    setAttachments(nextFiles);
+    setUploadError(errors.join(" "));
+    event.target.value = "";
+  }
+
+  function handleRemoveAttachment(fileToRemove: File) {
+    setAttachments((currentFiles) =>
+      currentFiles.filter((file) => getFileKey(file) !== getFileKey(fileToRemove)),
+    );
+    setUploadError("");
+  }
 
   async function handleSubmit() {
+    if (!canSubmitComplaint || submitting) {
+      return;
+    }
+
     setSubmitting(true);
-    // Simulate API call
-    await new Promise((r) => setTimeout(r, 1800));
-    setRefNumber(generateRef());
-    setSubmitting(false);
-    setStep(4);
+    setSubmitError("");
+
+    try {
+      const formData = new FormData();
+
+      formData.append("category", category);
+      formData.append("operator", operator);
+      formData.append("subject", subject);
+      formData.append("description", description);
+      formData.append("incidentDate", incidentDate);
+      formData.append("name", name);
+      formData.append("email", email);
+      formData.append("phone", phone);
+      formData.append("consentGiven", String(consentGiven));
+
+      for (const file of attachments) {
+        formData.append("attachments", file);
+      }
+
+      const response = await fetch("/api/complaints", {
+        method: "POST",
+        body: formData,
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            error?: string;
+            id?: string;
+            attachments?: Array<{ name: string }>;
+          }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error || "We could not submit your complaint right now. Please try again.",
+        );
+      }
+
+      setRefNumber(payload?.id ?? "");
+      setSubmittedAttachmentCount(payload?.attachments?.length ?? attachments.length);
+      setStep(4);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "We could not submit your complaint right now. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -303,8 +440,45 @@ export default function ComplaintSection() {
                       <label className="flex flex-col items-center justify-center gap-2 w-full h-24 border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-[#027ac6] hover:bg-blue-50/30 transition-all">
                         <Upload className="w-5 h-5 text-gray-400" />
                         <span className="text-sm text-gray-400">Upload screenshots, bills, or documents</span>
-                        <input type="file" className="hidden" accept="image/*,.pdf,.doc,.docx" multiple />
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept="image/*,.pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.webp"
+                          multiple
+                          onChange={handleAttachmentChange}
+                        />
                       </label>
+                      <p className="mt-2 text-xs text-gray-400">
+                        Optional. Up to {MAX_ATTACHMENTS} files, 10 MB each.
+                      </p>
+                      {uploadError && (
+                        <p className="mt-2 text-xs font-medium text-red-600">{uploadError}</p>
+                      )}
+                      {attachments.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {attachments.map((file) => (
+                            <div
+                              key={getFileKey(file)}
+                              className="flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/50 px-3 py-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-[#06193e]">
+                                  {file.name}
+                                </p>
+                                <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveAttachment(file)}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:border-red-200 hover:text-red-500"
+                                aria-label={`Remove ${file.name}`}
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -393,7 +567,12 @@ export default function ComplaintSection() {
                     </div>
 
                     <label className="flex items-start gap-3 cursor-pointer group">
-                      <input type="checkbox" className="mt-0.5 w-4 h-4 accent-[#027ac6]" required />
+                      <input
+                        type="checkbox"
+                        checked={consentGiven}
+                        onChange={(event) => setConsentGiven(event.target.checked)}
+                        className="mt-0.5 w-4 h-4 accent-[#027ac6]"
+                      />
                       <span className="text-xs text-gray-500 leading-relaxed">
                         I consent to BOCRA collecting and processing my personal information for the
                         purpose of investigating this complaint, in accordance with the{" "}
@@ -413,7 +592,7 @@ export default function ComplaintSection() {
                       Back
                     </button>
                     <button
-                      disabled={!canStep4 || submitting}
+                      disabled={!canSubmitComplaint || submitting}
                       onClick={handleSubmit}
                       className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl bg-[#027ac6] text-white font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#005ea6] transition-colors"
                     >
@@ -427,6 +606,9 @@ export default function ComplaintSection() {
                       )}
                     </button>
                   </div>
+                  {submitError && (
+                    <p className="mt-3 text-sm font-medium text-red-600">{submitError}</p>
+                  )}
                 </motion.div>
               )}
 
@@ -464,6 +646,9 @@ export default function ComplaintSection() {
                     <p>✓ Complaint submitted for: <strong className="text-gray-800">{operator}</strong></p>
                     <p>✓ Category: <strong className="text-gray-800">{CATEGORIES.find(c => c.id === category)?.label}</strong></p>
                     <p>✓ Updates will be sent to: <strong className="text-gray-800">{email}</strong></p>
+                    {submittedAttachmentCount > 0 && (
+                      <p>✓ Supporting files attached: <strong className="text-gray-800">{submittedAttachmentCount}</strong></p>
+                    )}
                   </div>
 
                   <button
@@ -477,6 +662,12 @@ export default function ComplaintSection() {
                       setEmail("");
                       setPhone("");
                       setIncidentDate("");
+                      setAttachments([]);
+                      setConsentGiven(false);
+                      setUploadError("");
+                      setSubmitError("");
+                      setSubmittedAttachmentCount(0);
+                      setRefNumber("");
                     }}
                     className="mt-6 w-full py-4 rounded-xl border border-gray-200 text-gray-600 font-bold hover:bg-gray-50 transition-colors"
                   >

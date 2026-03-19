@@ -1,22 +1,45 @@
 "use client";
 
+import {
+  COMPLAINT_FILE_INPUT_ACCEPT,
+  COMPLAINT_FIELD_LABELS,
+  EMPTY_COMPLAINT_DRAFT,
+  formatComplaintFileSize,
+  getComplaintAttachmentKey,
+  hasComplaintDraftContent,
+  isAllowedComplaintAttachment,
+  listMissingComplaintFields,
+  MAX_COMPLAINT_ATTACHMENTS,
+  MAX_COMPLAINT_FILE_SIZE,
+  normalizeComplaintDraft,
+  type ComplaintAttachmentMeta,
+  type ComplaintDraft,
+  type ComplaintField,
+} from "@/lib/complaints";
 import { MessageLoading } from "@/components/ui/message-loading";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import {
   Bot,
   MessageSquare,
+  Paperclip,
   Send,
   ShieldCheck,
   User,
   X,
 } from "lucide-react";
-import { FormEvent, Fragment, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, Fragment, useEffect, useRef, useState } from "react";
 
 type Message = {
   id: string;
   role: "user" | "bot";
   content: string;
+};
+
+type SubmittedComplaint = {
+  id: string;
+  status: string;
+  attachmentCount: number;
 };
 
 const QUICK_PROMPTS = [
@@ -167,6 +190,56 @@ function FormattedMessage({
   );
 }
 
+const COMPLAINT_SUMMARY_FIELDS: ComplaintField[] = [
+  "category",
+  "operator",
+  "subject",
+  "name",
+  "email",
+  "phone",
+  "consentGiven",
+];
+
+function formatComplaintValue(field: ComplaintField, draft: ComplaintDraft) {
+  if (field === "consentGiven") {
+    return draft.consentGiven ? "Given" : "";
+  }
+
+  if (field === "category") {
+    return draft.category
+      ? draft.category
+          .split("_")
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ")
+      : "";
+  }
+
+  return draft[field];
+}
+
+function isComplaintField(value: unknown): value is ComplaintField {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(COMPLAINT_FIELD_LABELS, value)
+  );
+}
+
+function getAttachmentMetadata(files: File[]): ComplaintAttachmentMeta[] {
+  return files.map((file) => ({
+    name: file.name,
+    size: file.size,
+    type: file.type || "application/octet-stream",
+  }));
+}
+
+function buildAttachmentOnlyMessage(files: File[]) {
+  return [
+    "I have attached supporting evidence for my complaint.",
+    "",
+    ...files.map((file) => `- ${file.name}`),
+  ].join("\n");
+}
+
 export function FloatingChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -179,9 +252,42 @@ export function FloatingChatWidget() {
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [complaintDraft, setComplaintDraft] = useState<ComplaintDraft>(EMPTY_COMPLAINT_DRAFT);
+  const [complaintFlowActive, setComplaintFlowActive] = useState(false);
+  const [complaintMissingFields, setComplaintMissingFields] = useState<ComplaintField[]>([]);
+  const [complaintReadyToSubmit, setComplaintReadyToSubmit] = useState(false);
+  const [submittedComplaint, setSubmittedComplaint] = useState<SubmittedComplaint | null>(null);
+  const [chatAttachments, setChatAttachments] = useState<File[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const hasUserMessages = messages.some((message) => message.role === "user");
-  const showQuickPrompts = !hasUserMessages && input.trim().length === 0;
+  const effectiveComplaintFlowActive = complaintFlowActive || chatAttachments.length > 0;
+  const effectiveComplaintMissingFields = effectiveComplaintFlowActive
+    ? complaintMissingFields.length > 0
+      ? complaintMissingFields
+      : listMissingComplaintFields(complaintDraft)
+    : [];
+  const readyForComplaintSubmit =
+    (complaintReadyToSubmit || effectiveComplaintMissingFields.length === 0) &&
+    (effectiveComplaintFlowActive || hasComplaintDraftContent(complaintDraft));
+  const complaintProgress = Math.round(
+    ((COMPLAINT_SUMMARY_FIELDS.length - effectiveComplaintMissingFields.length) /
+      COMPLAINT_SUMMARY_FIELDS.length) *
+      100,
+  );
+  const capturedComplaintItems = COMPLAINT_SUMMARY_FIELDS.map((field) => ({
+    label: COMPLAINT_FIELD_LABELS[field],
+    value: formatComplaintValue(field, complaintDraft),
+  })).filter((item) => Boolean(item.value));
+  const missingFieldPreview = effectiveComplaintMissingFields.slice(0, 3);
+  const showQuickPrompts =
+    !hasUserMessages && input.trim().length === 0 && chatAttachments.length === 0;
+  const showComplaintCard =
+    effectiveComplaintFlowActive ||
+    hasComplaintDraftContent(complaintDraft) ||
+    submittedComplaint !== null ||
+    chatAttachments.length > 0;
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -191,8 +297,145 @@ export function FloatingChatWidget() {
     });
   }, [messages, isLoading, isOpen]);
 
+  function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files ?? []);
+
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    const nextFiles = [...chatAttachments];
+    const errors: string[] = [];
+
+    for (const file of selectedFiles) {
+      if (!isAllowedComplaintAttachment(file)) {
+        errors.push(`${file.name} is not a supported file type.`);
+        continue;
+      }
+
+      if (file.size > MAX_COMPLAINT_FILE_SIZE) {
+        errors.push(`${file.name} exceeds the 10 MB upload limit.`);
+        continue;
+      }
+
+      if (
+        nextFiles.some(
+          (existingFile) =>
+            getComplaintAttachmentKey(existingFile) === getComplaintAttachmentKey(file),
+        )
+      ) {
+        continue;
+      }
+
+      if (nextFiles.length >= MAX_COMPLAINT_ATTACHMENTS) {
+        errors.push(`You can attach up to ${MAX_COMPLAINT_ATTACHMENTS} files.`);
+        break;
+      }
+
+      nextFiles.push(file);
+    }
+
+    setChatAttachments(nextFiles);
+    setAttachmentError(errors.join(" "));
+    setComplaintFlowActive(true);
+    setComplaintMissingFields(listMissingComplaintFields(complaintDraft));
+    setSubmittedComplaint(null);
+    event.target.value = "";
+  }
+
+  function handleRemoveAttachment(fileToRemove: File) {
+    const nextAttachments = chatAttachments.filter(
+      (file) =>
+        getComplaintAttachmentKey(file) !== getComplaintAttachmentKey(fileToRemove),
+    );
+
+    setChatAttachments(nextAttachments);
+    if (nextAttachments.length === 0 && !hasComplaintDraftContent(complaintDraft)) {
+      setComplaintFlowActive(false);
+      setComplaintMissingFields([]);
+      setComplaintReadyToSubmit(false);
+    }
+    setAttachmentError("");
+  }
+
+  async function submitComplaintFromChat(draft: ComplaintDraft) {
+    const formData = new FormData();
+
+    formData.append("category", draft.category);
+    formData.append("operator", draft.operator);
+    formData.append("subject", draft.subject);
+    formData.append("description", draft.description);
+    formData.append("incidentDate", draft.incidentDate);
+    formData.append("name", draft.name);
+    formData.append("email", draft.email);
+    formData.append("phone", draft.phone);
+    formData.append("consentGiven", String(draft.consentGiven));
+
+    for (const file of chatAttachments) {
+      formData.append("attachments", file);
+    }
+
+    const response = await fetch("/api/complaints", {
+      method: "POST",
+      body: formData,
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | {
+          error?: string;
+          id?: string;
+          status?: string;
+          attachments?: ComplaintAttachmentMeta[];
+        }
+      | null;
+
+    if (!response.ok) {
+      throw new Error(
+        payload?.error || "We could not submit your complaint right now. Please try again.",
+      );
+    }
+
+    const attachmentCount = Array.isArray(payload?.attachments)
+      ? payload.attachments.length
+      : chatAttachments.length;
+    const submitted = {
+      id: payload?.id || "BCR-PENDING",
+      status: payload?.status || "Received",
+      attachmentCount,
+    };
+
+    setSubmittedComplaint(submitted);
+    setComplaintDraft(EMPTY_COMPLAINT_DRAFT);
+    setComplaintFlowActive(false);
+    setComplaintMissingFields([]);
+    setComplaintReadyToSubmit(false);
+    setChatAttachments([]);
+    setAttachmentError("");
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-submitted`,
+        role: "bot",
+        content: [
+          "Your complaint has been submitted successfully.",
+          "",
+          `- **Reference Number:** ${submitted.id}`,
+          `- **Status:** ${submitted.status}`,
+          `- **Supporting Files:** ${submitted.attachmentCount}`,
+        ].join("\n"),
+      },
+    ]);
+  }
+
   async function sendMessage(rawMessage?: string) {
-    const content = (rawMessage ?? input).trim();
+    const typedContent = (rawMessage ?? input).trim();
+    const attachmentMessage = chatAttachments.length > 0
+      ? buildAttachmentOnlyMessage(chatAttachments)
+      : "";
+    const content = typedContent || attachmentMessage;
+    const requestMessage =
+      typedContent || "I have attached supporting evidence for my complaint.";
+
     if (!content || isLoading) return;
 
     const userMessage: Message = {
@@ -201,15 +444,26 @@ export function FloatingChatWidget() {
       content,
     };
 
+    setSubmittedComplaint(null);
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
 
     try {
+      const history = [...messages, userMessage].map(({ role, content: historyContent }) => ({
+        role,
+        content: historyContent,
+      }));
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: content }),
+        body: JSON.stringify({
+          message: requestMessage,
+          history,
+          complaintDraft,
+          attachments: getAttachmentMetadata(chatAttachments),
+        }),
       });
 
       if (!res.ok) {
@@ -226,6 +480,13 @@ export function FloatingChatWidget() {
         typeof data?.reply === "string" && data.reply.trim()
           ? data.reply
           : "I could not generate a response just now. Please try again.";
+      const nextComplaintDraft = normalizeComplaintDraft(
+        data?.complaintDraft ?? EMPTY_COMPLAINT_DRAFT,
+      );
+      const nextComplaintFlowActive = Boolean(data?.complaintFlowActive);
+      const nextMissingFields = Array.isArray(data?.missingFields)
+        ? data.missingFields.filter(isComplaintField)
+        : [];
 
       setMessages((prev) => [
         ...prev,
@@ -235,6 +496,14 @@ export function FloatingChatWidget() {
           content: reply,
         },
       ]);
+      setComplaintDraft(nextComplaintDraft);
+      setComplaintFlowActive(nextComplaintFlowActive);
+      setComplaintMissingFields(nextMissingFields);
+      setComplaintReadyToSubmit(Boolean(data?.readyToSubmit));
+
+      if (data?.shouldSubmitComplaint) {
+        await submitComplaintFromChat(nextComplaintDraft);
+      }
     } catch (error) {
       setMessages((prev) => [
         ...prev,
@@ -387,24 +656,196 @@ export function FloatingChatWidget() {
             </div>
 
             <div className="border-t border-slate-200/70 bg-white/88 p-4 backdrop-blur-xl">
+              {showComplaintCard && (
+                <div
+                  className={cn(
+                    "mb-4 rounded-[1.4rem] border px-4 py-3 shadow-sm",
+                    submittedComplaint
+                      ? "border-emerald-200 bg-emerald-50/80"
+                      : "border-[#75AADB]/20 bg-white/92",
+                  )}
+                >
+                  {submittedComplaint ? (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                        Complaint Submitted
+                      </p>
+                      <p className="text-lg font-black tracking-wide text-[#06193e]">
+                        {submittedComplaint.id}
+                      </p>
+                      <p className="text-xs text-emerald-700">
+                        Status: {submittedComplaint.status}
+                      </p>
+                      {submittedComplaint.attachmentCount > 0 && (
+                        <p className="text-xs text-emerald-700">
+                          Supporting files: {submittedComplaint.attachmentCount}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#027ac6]">
+                            Complaint Intake
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-[#06193e]">
+                            {readyForComplaintSubmit
+                              ? "Everything needed is ready"
+                              : `${COMPLAINT_SUMMARY_FIELDS.length - effectiveComplaintMissingFields.length}/${COMPLAINT_SUMMARY_FIELDS.length} details captured`}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            I&apos;ll keep the complaint details and contact info together while you chat.
+                          </p>
+                        </div>
+                        {readyForComplaintSubmit && (
+                          <button
+                            type="button"
+                            onClick={() => void sendMessage("Please submit my complaint now.")}
+                            disabled={isLoading}
+                            className="shrink-0 rounded-full bg-[#06193e] px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#027ac6] disabled:cursor-not-allowed disabled:bg-slate-300"
+                          >
+                            Submit Complaint
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="h-full rounded-full bg-[linear-gradient(90deg,_#06193e,_#027ac6)] transition-all"
+                          style={{ width: `${Math.max(10, complaintProgress)}%` }}
+                        />
+                      </div>
+
+                      {capturedComplaintItems.length > 0 || chatAttachments.length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {capturedComplaintItems.map((item) => (
+                            <div
+                              key={item.label}
+                              className="inline-flex max-w-full items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-600"
+                            >
+                              <span className="text-slate-400">{item.label}:</span>
+                              <span className="max-w-[8.5rem] truncate font-semibold text-[#06193e]">
+                                {item.value}
+                              </span>
+                            </div>
+                          ))}
+                          {chatAttachments.length > 0 && (
+                            <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-600">
+                              <span className="text-slate-400">Files:</span>
+                              <span className="font-semibold text-[#06193e]">
+                                {chatAttachments.length} attached
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-xs text-slate-500">
+                          Start by describing the problem, the operator involved, or your contact details.
+                        </p>
+                      )}
+
+                      {!readyForComplaintSubmit && effectiveComplaintMissingFields.length > 0 && (
+                        <>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {missingFieldPreview.map((field) => (
+                              <span
+                                key={field}
+                                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500"
+                              >
+                                {COMPLAINT_FIELD_LABELS[field]}
+                              </span>
+                            ))}
+                            {effectiveComplaintMissingFields.length > missingFieldPreview.length && (
+                              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-400">
+                                +{effectiveComplaintMissingFields.length - missingFieldPreview.length} more
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="mt-3 text-xs text-slate-500">
+                            Next up: {COMPLAINT_FIELD_LABELS[effectiveComplaintMissingFields[0]]}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {chatAttachments.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {chatAttachments.map((file) => (
+                    <div
+                      key={getComplaintAttachmentKey(file)}
+                      className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5"
+                    >
+                      <span className="max-w-[9rem] truncate text-[11px] font-medium text-slate-600">
+                        {file.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {formatComplaintFileSize(file.size)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(file)}
+                        className="rounded-full text-slate-400 transition-colors hover:text-red-500"
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {attachmentError && (
+                <p className="mb-3 text-xs font-medium text-red-600">{attachmentError}</p>
+              )}
+
               <form onSubmit={handleSubmit} className="flex items-center gap-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept={COMPLAINT_FILE_INPUT_ACCEPT}
+                  multiple
+                  onChange={handleAttachmentChange}
+                />
                 <label className="sr-only" htmlFor="bocra-chat-input">
                   Message BOCRA Assistant
                 </label>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading || chatAttachments.length >= MAX_COMPLAINT_ATTACHMENTS}
+                  className={cn(
+                    "flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition-colors",
+                    isLoading || chatAttachments.length >= MAX_COMPLAINT_ATTACHMENTS
+                      ? "cursor-not-allowed opacity-50"
+                      : "hover:border-[#027ac6]/40 hover:bg-white hover:text-[#027ac6]",
+                  )}
+                  aria-label="Attach supporting files"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
                 <input
                   id="bocra-chat-input"
                   type="text"
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
-                  placeholder="Ask BOCRA anything..."
+                  placeholder={
+                    effectiveComplaintFlowActive
+                      ? "Next complaint detail..."
+                      : "Ask BOCRA anything..."
+                  }
                   className="h-12 flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-[#027ac6]/40 focus:bg-white focus:ring-4 focus:ring-[#027ac6]/10"
                 />
                 <button
                   type="submit"
-                  disabled={!input.trim() || isLoading}
+                  disabled={(!input.trim() && chatAttachments.length === 0) || isLoading}
                   className={cn(
                     "flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg transition-all",
-                    !input.trim() || isLoading
+                    (!input.trim() && chatAttachments.length === 0) || isLoading
                       ? "cursor-not-allowed bg-slate-200 text-slate-400 shadow-none"
                       : "bg-[#06193e] hover:-translate-y-0.5 hover:bg-[#027ac6] hover:shadow-[0_12px_28px_-14px_rgba(2,122,198,0.75)]",
                   )}

@@ -45,6 +45,7 @@ const NAV = [
       { label: "History", href: "/about/history", desc: "Communication regulation in Botswana" },
       { label: "Board of Directors", href: "/about/board", desc: "BOCRA's governing board" },
       { label: "Executive Management", href: "/about/executive", desc: "Senior leadership team" },
+      { label: "Projects", href: "/projects", desc: "Current BOCRA projects" },
       { label: "Careers", href: "/about/careers", desc: "Join the BOCRA team" },
     ],
   },
@@ -61,8 +62,13 @@ const NAV = [
     ],
   },
   {
-    name: "Projects",
-    href: "/projects",
+    name: "Services",
+    href: "/services",
+    dropdown: [
+      { label: "Licence Verification", href: "/services/licence-verification", desc: "Verify BOCRA-issued licence status" },
+      { label: "Type Approval Certificates", href: "/services/type-approval", desc: "Search approved devices registry" },
+      { label: "Register .bw Domain", href: "/services/domain-registration", desc: "Register a .bw domain name" },
+    ],
   },
   {
     name: "Documents",

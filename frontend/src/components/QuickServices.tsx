@@ -141,9 +141,7 @@ export default function QuickServices() {
               className="group"
             >
               <a
-                href="https://customerportal.bocra.org.bw/OnlineLicenseVerification/verify"
-                target="_blank"
-                rel="noopener noreferrer"
+                href="/services/licence-verification"
                 className="block h-full"
               >
                 <div className="h-full min-h-[130px] bg-[#1C6B3C] rounded-2xl p-6 flex flex-col justify-between group-hover:bg-[#175730] transition-colors">
@@ -169,7 +167,7 @@ export default function QuickServices() {
               transition={{ delay: 0.2 }}
               className="group"
             >
-              <a href="#consumer-tools" className="block h-full">
+              <a href="/services/type-approval" className="block h-full">
                 <div className="h-full min-h-[130px] bg-violet-950 rounded-2xl p-6 flex flex-col justify-between group-hover:bg-violet-900 transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="w-10 h-10 bg-violet-400/20 rounded-lg flex items-center justify-center">
@@ -179,7 +177,7 @@ export default function QuickServices() {
                   </div>
                   <div>
                     <h3 className="font-bold text-white text-base mb-1">Check Device Approval</h3>
-                    <p className="text-violet-300/60 text-xs leading-relaxed">Real Luhn algorithm validation</p>
+                    <p className="text-violet-300/60 text-xs leading-relaxed">Search 8,700+ approved devices</p>
                   </div>
                 </div>
               </a>

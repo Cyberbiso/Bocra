@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Smartphone, Search, CheckCircle2, XCircle, Loader2, ArrowRight } from "lucide-react";
+import Particles from "./Particles";
 
 // Luhn algorithm for IMEI validation
 function luhnCheck(imei: string): boolean {
@@ -100,6 +101,7 @@ export default function ConsumerTools() {
   return (
     <section id="consumer-tools" className="py-20 bg-[#06193e] relative overflow-hidden">
       <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '28px 28px' }} />
+      <Particles count={120} connectionDistance={130} speed={0.25} maxRadius={1.5} maxOpacity={0.35} lineOpacity={0.09} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         <div className="text-center mb-12">

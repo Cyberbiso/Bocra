@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Phone, Mail, MapPin, ExternalLink, ArrowUpRight } from "lucide-react";
+import Particles from "./Particles";
 
 function FacebookIcon() {
   return (
@@ -25,9 +26,24 @@ function LinkedInIcon() {
 }
 
 const SOCIAL = [
-  { label: "Facebook", href: "https://www.facebook.com/BTAbw/", icon: FacebookIcon, color: "hover:bg-[#1877F2]" },
-  { label: "X", href: "https://x.com/BOCRAbw", icon: XIcon, color: "hover:bg-black" },
-  { label: "LinkedIn", href: "https://bw.linkedin.com/company/bta_3", icon: LinkedInIcon, color: "hover:bg-[#0A66C2]" },
+  {
+    label: "Facebook",
+    href: "https://www.facebook.com/BTAbw/",
+    icon: FacebookIcon,
+    color: "hover:bg-[#1877F2]",
+  },
+  {
+    label: "X",
+    href: "https://x.com/BOCRAbw",
+    icon: XIcon,
+    color: "hover:bg-black",
+  },
+  {
+    label: "LinkedIn",
+    href: "https://bw.linkedin.com/company/bta_3",
+    icon: LinkedInIcon,
+    color: "hover:bg-[#0A66C2]",
+  },
 ];
 
 const QUICK_LINKS = [
@@ -41,8 +57,16 @@ const QUICK_LINKS = [
 
 const SERVICES = [
   { label: "File a Complaint", href: "/#complaints" },
-  { label: "Verify a Licence", href: "https://customerportal.bocra.org.bw/OnlineLicenseVerification/verify", external: true },
-  { label: "Type Approval", href: "https://typeapproval.bocra.org.bw/", external: true },
+  {
+    label: "Verify a Licence",
+    href: "https://customerportal.bocra.org.bw/OnlineLicenseVerification/verify",
+    external: true,
+  },
+  {
+    label: "Type Approval",
+    href: "https://typeapproval.bocra.org.bw/",
+    external: true,
+  },
   { label: "Register .bw Domain", href: "https://nic.net.bw/", external: true },
   { label: "Telecom Statistics", href: "/#statistics" },
   { label: "FAQs", href: "/faqs" },
@@ -64,13 +88,16 @@ export default function Footer() {
       <div
         className="absolute inset-0 pointer-events-none opacity-[0.04]"
         style={{
-          backgroundImage: "radial-gradient(circle, #75AADB 1px, transparent 1px)",
+          backgroundImage:
+            "radial-gradient(circle, #75AADB 1px, transparent 1px)",
           backgroundSize: "32px 32px",
         }}
       />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      {/* Animated particles */}
+      <Particles count={150} connectionDistance={130} lineOpacity={0.1} />
 
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         {/* === CTA Banner inside footer === */}
         <div className="py-10 border-b border-white/10">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
@@ -93,26 +120,37 @@ export default function Footer() {
 
         {/* === Main footer grid === */}
         <div className="py-14 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10">
-
           {/* Brand column */}
           <div className="lg:col-span-2">
             <div className="relative w-36 h-12 bg-white rounded-xl p-2 mb-6">
-              <Image src="/logo.png" alt="BOCRA Logo" fill className="object-contain p-1" />
+              <Image
+                src="/logo.png"
+                alt="BOCRA Logo"
+                fill
+                className="object-contain p-1"
+              />
             </div>
             <p className="text-gray-400 text-sm leading-relaxed mb-6 max-w-xs">
-              Botswana Communications Regulatory Authority — regulating the communications
-              sector for the benefit of Botswana citizens, operators, and the national economy.
+              Botswana Communications Regulatory Authority — regulating the
+              communications sector for the benefit of Botswana citizens,
+              operators, and the national economy.
             </p>
 
             {/* Contact */}
             <div className="space-y-3 mb-6">
-              <a href="tel:+26739577755" className="flex items-center gap-3 text-sm text-gray-400 hover:text-[#75AADB] transition-colors group">
+              <a
+                href="tel:+26739577755"
+                className="flex items-center gap-3 text-sm text-gray-400 hover:text-[#75AADB] transition-colors group"
+              >
                 <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-[#75AADB]/10 transition-colors">
                   <Phone className="w-4 h-4" />
                 </div>
                 +267 395 7755
               </a>
-              <a href="mailto:info@bocra.org.bw" className="flex items-center gap-3 text-sm text-gray-400 hover:text-[#75AADB] transition-colors group">
+              <a
+                href="mailto:info@bocra.org.bw"
+                className="flex items-center gap-3 text-sm text-gray-400 hover:text-[#75AADB] transition-colors group"
+              >
                 <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-[#75AADB]/10 transition-colors">
                   <Mail className="w-4 h-4" />
                 </div>
@@ -122,13 +160,19 @@ export default function Footer() {
                 <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center shrink-0 mt-0.5">
                   <MapPin className="w-4 h-4" />
                 </div>
-                <span>Plot 50671 Independence Avenue,<br />Gaborone, Botswana</span>
+                <span>
+                  Plot 50671 Independence Avenue,
+                  <br />
+                  Gaborone, Botswana
+                </span>
               </div>
             </div>
 
             {/* Social links */}
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 mb-3">Follow Us</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 mb-3">
+                Follow Us
+              </p>
               <div className="flex gap-2">
                 {SOCIAL.map(({ label, href, icon: Icon, color }) => (
                   <a
@@ -238,13 +282,29 @@ export default function Footer() {
         {/* === Bottom bar === */}
         <div className="py-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-xs text-gray-500">
-            © {new Date().getFullYear()} Botswana Communications Regulatory Authority.
-            All rights reserved. BOCRA is an independent regulatory authority.
+            © {new Date().getFullYear()} Botswana Communications Regulatory
+            Authority. All rights reserved. BOCRA is an independent regulatory
+            authority.
           </p>
           <div className="flex gap-6 text-xs font-medium">
-            <Link href="/privacy-notice" className="text-gray-500 hover:text-[#75AADB] transition-colors">Privacy Notice</Link>
-            <Link href="/faqs" className="text-gray-500 hover:text-[#75AADB] transition-colors">FAQs</Link>
-            <Link href="/tenders" className="text-gray-500 hover:text-[#75AADB] transition-colors">Tenders</Link>
+            <Link
+              href="/privacy-notice"
+              className="text-gray-500 hover:text-[#75AADB] transition-colors"
+            >
+              Privacy Notice
+            </Link>
+            <Link
+              href="/faqs"
+              className="text-gray-500 hover:text-[#75AADB] transition-colors"
+            >
+              FAQs
+            </Link>
+            <Link
+              href="/tenders"
+              className="text-gray-500 hover:text-[#75AADB] transition-colors"
+            >
+              Tenders
+            </Link>
           </div>
         </div>
       </div>

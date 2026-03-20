@@ -1,5 +1,17 @@
-import { redirect } from "next/navigation";
+import Chatbot from "@/components/Chatbot";
+import ServicesHub from "@/components/ServicesHub";
+
+export const metadata = {
+  title: "Services | BOCRA",
+  description:
+    "Access BOCRA digital services, search network coverage areas, verify licences, and explore service tools from one hub.",
+};
 
 export default function ServicesPage() {
-  redirect("/services/licence-verification");
+  return (
+    <>
+      <ServicesHub />
+      <Chatbot />
+    </>
+  );
 }

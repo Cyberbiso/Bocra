@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const DQOS_CHARTDATA_URL = "https://dqos.bocra.org.bw/api/chartdata";
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -33,22 +33,52 @@ const PROVIDERS = [
 ] as const;
 
 const BENCHMARK_LINKS = [
-  {
-    id: "mascom-btc",
-    label: "Mascom vs BTC",
-    href: "https://dqos.bocra.org.bw/nms-benchmark#mascom-btc",
-  },
-  {
-    id: "mascom-orange",
-    label: "Mascom vs Orange",
-    href: "https://dqos.bocra.org.bw/nms-benchmark#mascom-orange",
-  },
-  {
-    id: "orange-btc",
-    label: "Orange vs BTC",
-    href: "https://dqos.bocra.org.bw/nms-benchmark#orange-btc",
-  },
+  { id: "mascom-btc", label: "Mascom vs BTC", href: "https://dqos.bocra.org.bw/nms-benchmark#mascom-btc" },
+  { id: "mascom-orange", label: "Mascom vs Orange", href: "https://dqos.bocra.org.bw/nms-benchmark#mascom-orange" },
+  { id: "orange-btc", label: "Orange vs BTC", href: "https://dqos.bocra.org.bw/nms-benchmark#orange-btc" },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Mock fallback data
+// ---------------------------------------------------------------------------
+
+const MOCK_PROVIDER_METRICS: Record<
+  string,
+  { voice_na: number; voice_sa: number; voice_sr: number }
+> = {
+  mascom: { voice_na: 97.2, voice_sa: 94.8, voice_sr: 98.5 },
+  orange: { voice_na: 95.6, voice_sa: 93.1, voice_sr: 97.2 },
+  btc:    { voice_na: 93.8, voice_sa: 91.5, voice_sr: 96.0 },
+};
+
+function buildMockSummary(resolvedDate: string, providerFilter?: string) {
+  const filtered = PROVIDERS.filter(
+    (p) => !providerFilter || p.id === providerFilter,
+  );
+
+  const providers = filtered.map((p) => {
+    const m = MOCK_PROVIDER_METRICS[p.id];
+    return {
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      logoUrl: p.logoUrl,
+      networks: p.networks,
+      vendor: "Mixed",
+      primaryMetric: { id: "voice_na", label: "3G Voice NA", value: m.voice_na },
+      secondaryMetrics: [
+        { id: "voice_sa", label: "Voice SA", value: m.voice_sa },
+        { id: "voice_sr", label: "Voice SR", value: m.voice_sr },
+      ],
+    };
+  });
+
+  return { resolvedDate, providers };
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 type MetricRecord = Record<string, string | number | null | undefined>;
 
@@ -68,82 +98,61 @@ type DqosChartData = Record<
 
 type DqosPayload = {
   success?: boolean;
-  data?: {
-    data?: DqosChartData;
-  };
+  data?: { data?: DqosChartData };
 };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function formatIsoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
 function parseMetric(value: unknown) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value === "string") {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
-
   return null;
 }
 
-function getPreferredVendor(
-  networkData?: Record<string, Record<string, LocationEntry>>,
-) {
-  if (!networkData) {
-    return null;
-  }
-
+function getPreferredVendor(networkData?: Record<string, Record<string, LocationEntry>>) {
+  if (!networkData) return null;
   const vendors = Object.keys(networkData);
-
-  if (vendors.length === 0) {
-    return null;
-  }
-
+  if (vendors.length === 0) return null;
   return vendors.includes("Mixed") ? "Mixed" : vendors[0];
 }
 
 function getLocationEntry(
   networkData: Record<string, Record<string, LocationEntry>> | undefined,
   vendor: string,
+  locationId: string,
 ) {
   const vendorData = networkData?.[vendor];
-
-  if (!vendorData) {
-    return null;
-  }
-
-  return vendorData[DEFAULT_LOCATION_ID] ?? Object.values(vendorData)[0] ?? null;
+  if (!vendorData) return null;
+  return vendorData[locationId] ?? Object.values(vendorData)[0] ?? null;
 }
 
 function buildProviderSnapshot(
   provider: (typeof PROVIDERS)[number],
   chartData: DqosChartData[string] | undefined,
+  locationId: string,
 ) {
   const networkData = chartData?.[DEFAULT_NETWORK];
   const preferredVendor = getPreferredVendor(networkData);
+  if (!networkData || !preferredVendor) return null;
 
-  if (!networkData || !preferredVendor) {
-    return null;
-  }
-
-  const entry = getLocationEntry(networkData, preferredVendor);
+  const entry = getLocationEntry(networkData, preferredVendor, locationId);
   const metrics = entry?.data;
-
-  if (!metrics) {
-    return null;
-  }
+  if (!metrics) return null;
 
   const voiceNa = parseMetric(metrics.voice_na);
   const voiceSa = parseMetric(metrics.voice_sa);
   const voiceSr = parseMetric(metrics.voice_sr);
 
-  if (voiceNa == null && voiceSa == null && voiceSr == null) {
-    return null;
-  }
+  if (voiceNa == null && voiceSa == null && voiceSr == null) return null;
 
   return {
     id: provider.id,
@@ -152,54 +161,38 @@ function buildProviderSnapshot(
     logoUrl: provider.logoUrl,
     networks: provider.networks,
     vendor: preferredVendor,
-    primaryMetric: {
-      id: "voice_na",
-      label: "3G Voice NA",
-      value: voiceNa,
-    },
+    primaryMetric: { id: "voice_na", label: "3G Voice NA", value: voiceNa },
     secondaryMetrics: [
-      {
-        id: "voice_sa",
-        label: "Voice SA",
-        value: voiceSa,
-      },
-      {
-        id: "voice_sr",
-        label: "Voice SR",
-        value: voiceSr,
-      },
+      { id: "voice_sa", label: "Voice SA", value: voiceSa },
+      { id: "voice_sr", label: "Voice SR", value: voiceSr },
     ],
   };
 }
 
-async function fetchSummaryForDate(date: string) {
+async function fetchSummaryForDate(date: string, locationId: string, providerFilter?: string) {
   const searchParams = new URLSearchParams({
     kpi_type: "qos_values_for_location_level",
     level: "0",
     date,
+    ...(locationId !== DEFAULT_LOCATION_ID ? { location_id: locationId } : {}),
+    ...(providerFilter ? { provider: providerFilter } : {}),
   });
 
-  const response = await fetch(`${DQOS_CHARTDATA_URL}?${searchParams.toString()}`, {
-    headers: {
-      Accept: "application/json",
+  const response = await fetch(
+    `${DQOS_CHARTDATA_URL}?${searchParams.toString()}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+      next: { revalidate: 300 },
     },
-    next: {
-      revalidate: 60 * 60,
-    },
-  });
+  );
 
-  if (!response.ok) {
-    return null;
-  }
+  if (!response.ok) return null;
 
   const rawBody = await response.text();
-
-  if (!rawBody.trim()) {
-    return null;
-  }
+  if (!rawBody.trim()) return null;
 
   let payload: DqosPayload;
-
   try {
     payload = JSON.parse(rawBody) as DqosPayload;
   } catch {
@@ -207,72 +200,91 @@ async function fetchSummaryForDate(date: string) {
   }
 
   const chartData = payload.data?.data;
+  if (!chartData) return null;
 
-  if (!chartData) {
-    return null;
-  }
+  const candidateProviders = providerFilter
+    ? PROVIDERS.filter((p) => p.id === providerFilter)
+    : PROVIDERS;
 
-  const providers = PROVIDERS.map((provider) =>
-    buildProviderSnapshot(provider, chartData[provider.id]),
-  ).filter((provider): provider is NonNullable<typeof provider> => provider !== null);
+  const providers = candidateProviders
+    .map((p) => buildProviderSnapshot(p, chartData[p.id], locationId))
+    .filter((p): p is NonNullable<typeof p> => p !== null);
 
-  if (providers.length === 0) {
-    return null;
-  }
+  if (providers.length === 0) return null;
 
-  return {
-    resolvedDate: date,
-    providers,
-  };
+  return { resolvedDate: date, providers };
 }
 
-export async function GET() {
+// ---------------------------------------------------------------------------
+// Route handler
+// ---------------------------------------------------------------------------
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = request.nextUrl;
+  const dateParam = searchParams.get("date") ?? null;
+  const locationId = searchParams.get("locationId") ?? DEFAULT_LOCATION_ID;
+  const providerCode = searchParams.get("providerCode") ?? undefined;
+
   try {
     let summary: Awaited<ReturnType<typeof fetchSummaryForDate>> = null;
 
-    for (let offset = 0; offset < LOOKBACK_DAYS; offset += 1) {
-      const candidateDate = formatIsoDate(new Date(Date.now() - offset * DAY_IN_MS));
-      summary = await fetchSummaryForDate(candidateDate);
-
-      if (summary) {
-        break;
+    if (dateParam) {
+      // Caller specified an exact date — try that date only
+      summary = await fetchSummaryForDate(dateParam, locationId, providerCode);
+    } else {
+      // Auto-detect: walk back up to LOOKBACK_DAYS to find the latest available data
+      for (let offset = 0; offset < LOOKBACK_DAYS; offset++) {
+        const candidate = formatIsoDate(new Date(Date.now() - offset * DAY_IN_MS));
+        summary = await fetchSummaryForDate(candidate, locationId, providerCode);
+        if (summary) break;
       }
     }
 
-    if (!summary) {
-      return NextResponse.json(
-        { error: "Unable to load the DQOS NMS summary right now." },
-        { status: 502 },
-      );
-    }
+    if (!summary) throw new Error("no data from upstream");
 
     return NextResponse.json(
       {
         fetchedAt: new Date().toISOString(),
         resolvedDate: summary.resolvedDate,
+        locationId,
         preset: {
           network: DEFAULT_NETWORK.toUpperCase(),
           service: DEFAULT_SERVICE.toUpperCase(),
           kpi: DEFAULT_KPI.toUpperCase(),
-          scope: "National",
+          scope: locationId === DEFAULT_LOCATION_ID ? "National" : `Location ${locationId}`,
         },
         providers: summary.providers,
         detailsUrl: "https://dqos.bocra.org.bw/nms-details",
         summaryUrl: "https://dqos.bocra.org.bw/",
         benchmarkLinks: BENCHMARK_LINKS,
+        source: "live",
       },
-      {
-        headers: {
-          "Cache-Control": "s-maxage=3600, stale-while-revalidate=86400",
-        },
-      },
+      { headers: { "Cache-Control": "s-maxage=300, stale-while-revalidate=600" } },
     );
-  } catch (error) {
-    console.error("Failed to load DQOS NMS summary", error);
+  } catch (err) {
+    console.warn("[dqos/nms-summary] falling back to mock data:", err);
+
+    const resolvedDate = dateParam ?? formatIsoDate(new Date());
+    const mock = buildMockSummary(resolvedDate, providerCode);
 
     return NextResponse.json(
-      { error: "Unable to load the DQOS NMS summary right now." },
-      { status: 500 },
+      {
+        fetchedAt: new Date().toISOString(),
+        resolvedDate: mock.resolvedDate,
+        locationId,
+        preset: {
+          network: DEFAULT_NETWORK.toUpperCase(),
+          service: DEFAULT_SERVICE.toUpperCase(),
+          kpi: DEFAULT_KPI.toUpperCase(),
+          scope: locationId === DEFAULT_LOCATION_ID ? "National" : `Location ${locationId}`,
+        },
+        providers: mock.providers,
+        detailsUrl: "https://dqos.bocra.org.bw/nms-details",
+        summaryUrl: "https://dqos.bocra.org.bw/",
+        benchmarkLinks: BENCHMARK_LINKS,
+        source: "mock",
+      },
+      { headers: { "Cache-Control": "s-maxage=300, stale-while-revalidate=600" } },
     );
   }
 }

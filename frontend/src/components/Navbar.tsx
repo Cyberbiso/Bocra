@@ -3,8 +3,9 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
-import { Menu, X, ChevronDown, ExternalLink, Globe, Accessibility, Type, SunMoon } from "lucide-react";
+import { Menu, X, ChevronDown, ExternalLink, Globe, Accessibility, Type, SunMoon, Bot, LogIn } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useChatStore } from "@/lib/stores/chat-store";
 
 type FontSize = "sm" | "base" | "lg";
 const FONT_CLASSES: Record<FontSize, string> = { sm: "text-sm-a11y", base: "", lg: "text-lg-a11y" };
@@ -121,6 +122,7 @@ export default function Navbar() {
   const [expandedMobile, setExpandedMobile] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { fontSize, setFontSize, highContrast, setHighContrast } = useA11y();
+  const { toggle: toggleChat } = useChatStore();
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -247,6 +249,15 @@ export default function Navbar() {
               Tenders
             </Link>
 
+            <button
+              onClick={toggleChat}
+              className="flex items-center gap-2 px-3.5 py-2 text-[13px] font-bold text-gray-600 hover:text-[#06193e] hover:bg-gray-50 rounded-lg transition-colors"
+              aria-label="Open AI assistant"
+            >
+              <Bot className="w-4 h-4" />
+              <span className="hidden xl:inline">AI Assist</span>
+            </button>
+
             {/* Accessibility button */}
             <div className="relative">
               <button
@@ -298,6 +309,15 @@ export default function Navbar() {
               </AnimatePresence>
             </div>
 
+            <Link
+              href="/login"
+              className="flex items-center gap-2 px-2 py-2 text-[13px] font-bold text-[#06193e] border border-[#06193e] hover:bg-[#06193e] hover:text-white rounded-lg transition-all"
+            >
+              {/*<LogIn className="w-3.5 h-3.5" />*/}
+              Sign In
+            </Link>
+
+            {/*
             <div
               className="relative"
               onMouseEnter={openPortals}
@@ -347,6 +367,7 @@ export default function Navbar() {
                 )}
               </AnimatePresence>
             </div>
+            */}
           </div>
 
           {/* Mobile hamburger */}
@@ -411,7 +432,26 @@ export default function Navbar() {
                 </div>
               ))}
 
-              <div className="pt-4 mt-2 border-t border-gray-100">
+              <div className="pt-4 mt-2 border-t border-gray-100 space-y-1">
+                <button
+                  onClick={() => { toggleChat(); setIsOpen(false); }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:text-[#027ac6] rounded-xl hover:bg-blue-50/50 transition-colors"
+                >
+                  <Bot className="w-4 h-4" />
+                  AI Assist
+                </button>
+                <Link
+                  href="/login"
+                  onClick={() => setIsOpen(false)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold text-[#06193e] hover:text-white hover:bg-[#06193e] rounded-xl transition-colors"
+                >
+                  <LogIn className="w-4 h-4" />
+                  Sign In
+                </Link>
+              </div>
+
+              {/*
+              <div className="pt-2 border-t border-gray-100">
                 <p className="text-xs font-black text-gray-400 uppercase tracking-widest px-4 mb-2">External Portals</p>
                 {PORTALS.map((portal) => (
                   <a
@@ -426,6 +466,7 @@ export default function Navbar() {
                   </a>
                 ))}
               </div>
+              */}
             </div>
           </motion.div>
         )}

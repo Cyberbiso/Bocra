@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class ComplaintMessageCreate(BaseModel):
+    content: str = Field(min_length=1)
+    authorId: str | None = None
+
+
+class LicenseApplicationCreate(BaseModel):
+    category: str
+    licenceType: str
+    applicantName: str
+    applicantEmail: str
+    coverageArea: str | None = None
+    formData: dict[str, Any] = Field(default_factory=dict)
+
+
+class TypeApprovalApplicationCreate(BaseModel):
+    accreditationType: Literal["customer", "manufacturer", "repair_provider"]
+    brandName: str
+    modelName: str
+    simEnabled: Literal["yes", "no"]
+    techSpec: str | None = ""
+    sampleImei: str | None = ""
+    countryOfManufacture: str
+    declaration: bool = False
+
+
+class PaymentCreate(BaseModel):
+    invoiceId: str
+    method: Literal["mobile_money", "bank_transfer", "card"]
+    reference: str
+
+
+class AgentChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class AgentChatRequest(BaseModel):
+    messages: list[AgentChatMessage]
+    threadId: str | None = None
+
+
+class PublicChatRequest(BaseModel):
+    message: str

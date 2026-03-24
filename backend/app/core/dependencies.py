@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.orm import Session
+
+from app.config import get_settings
+from app.core.database import get_db
+from app.models.entities import SessionToken, User
+from app.repositories.bocra import AuthRepository
+
+settings = get_settings()
+
+
+def db_session(db: Session = Depends(get_db)) -> Session:
+    return db
+
+
+def get_current_session(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> tuple[SessionToken, User]:
+    session_token = request.cookies.get(settings.session_cookie_name) or request.headers.get("X-Session-Token")
+    if not session_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    auth_repo = AuthRepository(db)
+    session = auth_repo.get_active_session(session_token)
+    if not session or not session.user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+    return session, session.user
+
+
+def get_optional_session(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> tuple[SessionToken, User] | None:
+    session_token = request.cookies.get(settings.session_cookie_name) or request.headers.get("X-Session-Token")
+    if not session_token:
+        return None
+    auth_repo = AuthRepository(db)
+    session = auth_repo.get_active_session(session_token)
+    if not session or not session.user:
+        return None
+    return session, session.user
+
+
+def get_current_user(
+    current: tuple[SessionToken, User] = Depends(get_current_session),
+) -> User:
+    return current[1]
+
+
+def get_optional_user(
+    current: tuple[SessionToken, User] | None = Depends(get_optional_session),
+) -> User | None:
+    if current is None:
+        return None
+    return current[1]

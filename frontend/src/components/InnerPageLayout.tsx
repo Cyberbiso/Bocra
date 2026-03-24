@@ -32,7 +32,7 @@ export default function InnerPageLayout({
   children,
 }: InnerPageLayoutProps) {
   return (
-    <div className="min-h-screen mt-16 bg-[#FAFCFF]">
+    <div className="min-h-screen bg-[#FAFCFF]">
       {/* Banner */}
       <div className="relative bg-[#06193e] overflow-hidden">
         {/* Decorative background elements */}

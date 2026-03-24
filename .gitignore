@@ -4,6 +4,9 @@
 # Python
 __pycache__/
 *.py[cod]
+backend/.pytest_cache/
+backend/.storage/
+backend/bocra_dev.db
 backend/venv/
 backend/.env
 

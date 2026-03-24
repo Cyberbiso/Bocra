@@ -446,13 +446,6 @@ export default function Hero() {
               transition={{ duration: 0.6, delay: 0.3 }}
               className="flex flex-wrap gap-4 mb-12"
             >
-              <Link
-                href="/dashboard/home"
-                className="group flex items-center gap-2 bg-[#003580] hover:bg-[#004aab] text-white px-8 py-4 rounded-lg font-black text-sm tracking-wide transition-all shadow-lg shadow-[#003580]/40 active:scale-95"
-              >
-                Sign In
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </Link>
               <a
                 href="#complaints"
                 className="group flex items-center gap-2 bg-[#75AADB] hover:bg-[#5b96d0] text-[#03102A] px-8 py-4 rounded-lg font-black text-sm tracking-wide transition-all shadow-lg shadow-[#75AADB]/20 active:scale-95"
@@ -460,14 +453,12 @@ export default function Hero() {
                 File a Complaint
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </a>
-              <a
-                href="https://op-web.bocra.org.bw"
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href="/login"
                 className="flex items-center gap-2 border border-white/20 hover:border-white/40 text-white hover:bg-white/5 px-8 py-4 rounded-lg font-bold text-sm tracking-wide transition-all"
               >
                 BOCRA Portal
-              </a>
+              </Link>
             </motion.div>
 
             <motion.div

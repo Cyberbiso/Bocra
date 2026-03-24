@@ -73,9 +73,9 @@ const SERVICES = [
 ];
 
 const PORTALS = [
-  { label: "BOCRA Online Portal", href: "https://op-web.bocra.org.bw" },
-  { label: "QoS Monitoring", href: "https://dqos.bocra.org.bw" },
-  { label: "ASMS Spectrum Mgmt", href: "https://registration.bocra.org.bw/" },
+  { label: "BOCRA Online Portal", href: "/login", external: false },
+  { label: "QoS Monitoring", href: "https://dqos.bocra.org.bw", external: true },
+  { label: "ASMS Spectrum Mgmt", href: "https://registration.bocra.org.bw/", external: true },
 ];
 
 export default function Footer() {
@@ -109,12 +109,12 @@ export default function Footer() {
                 Having a problem with a telecom operator?
               </h3>
             </div>
-            <a
+            <Link
               href="/#complaints"
               className="shrink-0 bg-[#75AADB] hover:bg-[#5b96d0] text-[#03102A] font-black px-8 py-3.5 rounded-xl transition-all shadow-lg shadow-[#75AADB]/10 text-sm"
             >
               File a Complaint →
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -251,15 +251,25 @@ export default function Footer() {
             <ul className="space-y-3">
               {PORTALS.map((portal) => (
                 <li key={portal.label}>
-                  <a
-                    href={portal.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-gray-400 hover:text-white transition-colors flex items-center justify-between group"
-                  >
-                    {portal.label}
-                    <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-[#75AADB]" />
-                  </a>
+                  {portal.external ? (
+                    <a
+                      href={portal.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-gray-400 hover:text-white transition-colors flex items-center justify-between group"
+                    >
+                      {portal.label}
+                      <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-[#75AADB]" />
+                    </a>
+                  ) : (
+                    <Link
+                      href={portal.href}
+                      className="text-sm text-gray-400 hover:text-white transition-colors flex items-center justify-between group"
+                    >
+                      {portal.label}
+                      <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-[#75AADB]" />
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>

@@ -1,12 +1,10 @@
-
 import type { Metadata } from "next";
 import { Inter, Outfit, Geist } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import Providers from "./providers";
+import FooterConditional from "@/components/FooterConditional";
 import NavbarConditional from "@/components/NavbarConditional";
-import { ChatPanel } from "@/components/ChatPanel";
-
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-sans' });
 
@@ -45,9 +43,19 @@ export default function RootLayout({
       </head>
       <body className="min-h-full font-sans bg-[#FAFCFF] text-gray-900 selection:bg-[#00AEEE]/30 selection:text-[#004b87]">
         <Providers>
-          <NavbarConditional />
-          {children}
-          <ChatPanel />
+          <div className="flex min-h-full flex-col">
+            <a
+              href="#main-content"
+              className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-100 focus:bg-[#06193e] focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-bold"
+            >
+              Skip to main content
+            </a>
+            <NavbarConditional />
+            <main id="main-content" className="flex-1">
+              {children}
+            </main>
+            <FooterConditional />
+          </div>
         </Providers>
       </body>
     </html>

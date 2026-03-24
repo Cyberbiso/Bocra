@@ -3,23 +3,22 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
-import { Menu, X, ChevronDown, ExternalLink, Globe, Accessibility, Type, SunMoon, Bot, LogIn } from "lucide-react";
+import { Menu, X, ChevronDown, Globe, Accessibility, Type, SunMoon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useChatStore } from "@/lib/stores/chat-store";
 
 type FontSize = "sm" | "base" | "lg";
 const FONT_CLASSES: Record<FontSize, string> = { sm: "text-sm-a11y", base: "", lg: "text-lg-a11y" };
 
 function useA11y() {
-  const [fontSize, setFontSize] = useState<FontSize>("base");
-  const [highContrast, setHighContrast] = useState(false);
-
-  useEffect(() => {
-    const s = localStorage.getItem("a11y-font") as FontSize | null;
-    const c = localStorage.getItem("a11y-contrast") === "1";
-    if (s) setFontSize(s);
-    if (c) setHighContrast(true);
-  }, []);
+  const [fontSize, setFontSize] = useState<FontSize>(() => {
+    if (typeof window === "undefined") return "base";
+    const saved = localStorage.getItem("a11y-font");
+    return saved === "sm" || saved === "lg" || saved === "base" ? saved : "base";
+  });
+  const [highContrast, setHighContrast] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("a11y-contrast") === "1";
+  });
 
   useEffect(() => {
     const html = document.documentElement;
@@ -104,25 +103,14 @@ const NAV = [
   },
 ];
 
-const PORTALS = [
-  { label: "BOCRA Portal", href: "https://op-web.bocra.org.bw", desc: "Online regulatory portal" },
-  { label: "QoS Monitoring", href: "https://dqos.bocra.org.bw", desc: "Network quality data" },
-  { label: "Licence Verification", href: "https://customerportal.bocra.org.bw/OnlineLicenseVerification/verify", desc: "Check licence validity" },
-  { label: "Type Approval", href: "https://typeapproval.bocra.org.bw/", desc: "Device approval portal" },
-  { label: "Register .bw Domain", href: "https://nic.net.bw/", desc: "Domain registration" },
-  { label: "ASMS Spectrum", href: "https://registration.bocra.org.bw/", desc: "Spectrum management" },
-];
-
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [portalsOpen, setPortalsOpen] = useState(false);
   const [a11yOpen, setA11yOpen] = useState(false);
   const [expandedMobile, setExpandedMobile] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { fontSize, setFontSize, highContrast, setHighContrast } = useA11y();
-  const { toggle: toggleChat } = useChatStore();
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -133,21 +121,10 @@ export default function Navbar() {
   function openDropdown(name: string) {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     setActiveDropdown(name);
-    setPortalsOpen(false);
   }
 
   function closeDropdown() {
     timeoutRef.current = setTimeout(() => setActiveDropdown(null), 150);
-  }
-
-  function openPortals() {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    setPortalsOpen(true);
-    setActiveDropdown(null);
-  }
-
-  function closePortals() {
-    timeoutRef.current = setTimeout(() => setPortalsOpen(false), 150);
   }
 
   return (
@@ -240,7 +217,7 @@ export default function Navbar() {
             ))}
           </div>
 
-          {/* Right: Accessibility + Portals + Tenders */}
+          {/* Right: Accessibility + Portal + Tenders */}
           <div className="hidden lg:flex items-center gap-2">
             <Link
               href="/tenders"
@@ -249,19 +226,10 @@ export default function Navbar() {
               Tenders
             </Link>
 
-            <button
-              onClick={toggleChat}
-              className="flex items-center gap-2 px-3.5 py-2 text-[13px] font-bold text-gray-600 hover:text-[#06193e] hover:bg-gray-50 rounded-lg transition-colors"
-              aria-label="Open AI assistant"
-            >
-              <Bot className="w-4 h-4" />
-              <span className="hidden xl:inline">AI Assist</span>
-            </button>
-
             {/* Accessibility button */}
             <div className="relative">
               <button
-                onClick={() => { setA11yOpen((v) => !v); setPortalsOpen(false); }}
+                onClick={() => setA11yOpen((v) => !v)}
                 className="p-2 rounded-lg text-gray-500 hover:text-[#027ac6] hover:bg-gray-50 transition-colors"
                 aria-label="Accessibility options"
                 aria-expanded={a11yOpen}
@@ -311,63 +279,11 @@ export default function Navbar() {
 
             <Link
               href="/login"
-              className="flex items-center gap-2 px-2 py-2 text-[13px] font-bold text-[#06193e] border border-[#06193e] hover:bg-[#06193e] hover:text-white rounded-lg transition-all"
+              className="flex items-center gap-2 px-4 py-2 text-[13px] font-bold text-white bg-[#06193e] hover:bg-[#027ac6] rounded-lg transition-all shadow-sm"
             >
-              {/*<LogIn className="w-3.5 h-3.5" />*/}
-              Sign In
+              <Globe className="w-3.5 h-3.5" />
+              Portal
             </Link>
-
-            {/*
-            <div
-              className="relative"
-              onMouseEnter={openPortals}
-              onMouseLeave={closePortals}
-            >
-              <button className="flex items-center gap-2 px-4 py-2 text-[13px] font-bold text-white bg-[#06193e] hover:bg-[#027ac6] rounded-lg transition-all shadow-sm">
-                <Globe className="w-3.5 h-3.5" />
-                Portals
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${portalsOpen ? "rotate-180" : ""}`} />
-              </button>
-
-              <AnimatePresence>
-                {portalsOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 8, scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute top-full right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl shadow-gray-200/80 border border-gray-100 overflow-hidden z-50"
-                    onMouseEnter={openPortals}
-                    onMouseLeave={closePortals}
-                  >
-                    <div className="h-1 bg-linear-to-r from-[#06193e] to-[#75AADB]" />
-                    <div className="p-3">
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-2 mb-2">
-                        External Systems
-                      </p>
-                      {PORTALS.map((portal) => (
-                        <a
-                          key={portal.label}
-                          href={portal.href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-start gap-3 px-2 py-2.5 rounded-xl hover:bg-gray-50 group transition-colors"
-                        >
-                          <ExternalLink className="w-4 h-4 text-gray-300 group-hover:text-[#027ac6] mt-0.5 shrink-0 transition-colors" />
-                          <div>
-                            <p className="text-sm font-bold text-[#06193e] group-hover:text-[#027ac6] transition-colors">
-                              {portal.label}
-                            </p>
-                            <p className="text-xs text-gray-400">{portal.desc}</p>
-                          </div>
-                        </a>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-            */}
           </div>
 
           {/* Mobile hamburger */}
@@ -432,41 +348,16 @@ export default function Navbar() {
                 </div>
               ))}
 
-              <div className="pt-4 mt-2 border-t border-gray-100 space-y-1">
-                <button
-                  onClick={() => { toggleChat(); setIsOpen(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:text-[#027ac6] rounded-xl hover:bg-blue-50/50 transition-colors"
-                >
-                  <Bot className="w-4 h-4" />
-                  AI Assist
-                </button>
+              <div className="pt-4 mt-2 border-t border-gray-100">
                 <Link
                   href="/login"
                   onClick={() => setIsOpen(false)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold text-[#06193e] hover:text-white hover:bg-[#06193e] rounded-xl transition-colors"
+                  className="flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-600 hover:text-[#027ac6] rounded-xl hover:bg-blue-50/50 transition-colors"
                 >
-                  <LogIn className="w-4 h-4" />
-                  Sign In
+                  Portal
+                  <Globe className="w-3.5 h-3.5 text-gray-300" />
                 </Link>
               </div>
-
-              {/*
-              <div className="pt-2 border-t border-gray-100">
-                <p className="text-xs font-black text-gray-400 uppercase tracking-widest px-4 mb-2">External Portals</p>
-                {PORTALS.map((portal) => (
-                  <a
-                    key={portal.label}
-                    href={portal.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-600 hover:text-[#027ac6] rounded-xl hover:bg-blue-50/50 transition-colors"
-                  >
-                    {portal.label}
-                    <ExternalLink className="w-3.5 h-3.5 text-gray-300" />
-                  </a>
-                ))}
-              </div>
-              */}
             </div>
           </motion.div>
         )}

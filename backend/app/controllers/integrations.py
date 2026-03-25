@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import db_session, require_admin
 from app.core.security import utcnow
 from app.models.entities import ExternalSystem, User
+from app.models.schemas import ExternalSystemCreate
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
@@ -56,8 +57,31 @@ def _check_health(system: ExternalSystem) -> tuple[str, int | None]:
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+@router.post("", status_code=201)
+def create_integration(payload: ExternalSystemCreate, db: DbSession, _: AdminUser):
+    """Register a new external system. Generates an API key automatically."""
+    existing = db.scalar(select(ExternalSystem).where(ExternalSystem.system_code == payload.systemCode))
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A system with that code already exists.")
+    system = ExternalSystem(
+        system_code=payload.systemCode,
+        name=payload.name,
+        description=payload.description,
+        base_url=payload.baseUrl,
+        health_endpoint=payload.healthEndpoint or "/health",
+        api_key=f"bocra_{secrets.token_urlsafe(32)}",
+        contact_email=payload.contactEmail,
+        status_code="UNKNOWN",
+    )
+    db.add(system)
+    db.commit()
+    db.refresh(system)
+    # Return the full key unmasked once on creation
+    return _present(system, mask_key=False)
+
+
 @router.get("")
-def list_integrations(db: DbSession, _: AdminUser):
+def list_integrations(db: DbSession):
     """List all registered external systems with their last known health status."""
     systems = db.scalars(select(ExternalSystem).order_by(ExternalSystem.name)).all()
     return [_present(s) for s in systems]

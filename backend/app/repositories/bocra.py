@@ -357,6 +357,13 @@ class DeviceRepository:
         self.db.flush()
         return application
 
+    def get_ta_application_by_workflow_id(self, workflow_id: str) -> TypeApprovalApplication | None:
+        return self.db.scalar(
+            select(TypeApprovalApplication).where(
+                TypeApprovalApplication.workflow_application_id == workflow_id
+            )
+        )
+
     def list_verification_items(self) -> list[DeviceVerificationItem]:
         return list(self.db.scalars(select(DeviceVerificationItem)))
 
@@ -380,6 +387,11 @@ class CertificateRepository:
 
     def get_by_qr_token(self, token: str) -> Certificate | None:
         return self.db.scalar(select(Certificate).where(Certificate.qr_token == token))
+
+    def get_by_application_id(self, application_id: str) -> Certificate | None:
+        return self.db.scalar(
+            select(Certificate).where(Certificate.application_id == application_id)
+        )
 
 
 class BillingRepository:
@@ -410,6 +422,16 @@ class BillingRepository:
 
     def get_invoice(self, invoice_id: str) -> Invoice | None:
         return self.db.get(Invoice, invoice_id)
+
+    def create_invoice(self, invoice: Invoice) -> Invoice:
+        self.db.add(invoice)
+        self.db.flush()
+        return invoice
+
+    def get_invoice_by_application_id(self, application_id: str) -> Invoice | None:
+        return self.db.scalar(
+            select(Invoice).where(Invoice.application_id == application_id)
+        )
 
     def create_payment(self, payment: Payment) -> Payment:
         self.db.add(payment)

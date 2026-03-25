@@ -44,8 +44,13 @@ async def lifespan(_: FastAPI):
     create_schemas()
     Base.metadata.create_all(bind=engine)
     if settings.seed_demo_data:
-        with SessionLocal() as session:
-            seed_database(session)
+        try:
+            with SessionLocal() as session:
+                seed_database(session)
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "Demo seed skipped (data may already exist): %s", exc
+            )
     yield
 
 

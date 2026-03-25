@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import db_session, get_current_user, get_optional_user
+from app.core.dependencies import db_session, get_current_user, get_optional_user, require_officer_or_admin
 from app.models.entities import User
 from app.repositories.bocra import AuthRepository
 from app.services.auth import AuthService
@@ -17,6 +17,46 @@ from app.views.presenters import (
 )
 
 router = APIRouter(tags=["complaints"])
+
+_ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+_MAX_FILES = 5
+
+# Magic-byte signatures for supported types
+_MAGIC = {
+    b"%PDF": "application/pdf",
+    b"\xff\xd8\xff": "image/jpeg",
+    b"\x89PNG": "image/png",
+    b"RIFF": "image/webp",
+}
+
+
+def _validate_attachments(files: list[UploadFile]) -> None:
+    if len(files) > _MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"Maximum {_MAX_FILES} attachments allowed.")
+
+
+async def _read_and_validate(file: UploadFile) -> tuple[str, str, bytes]:
+    content = await file.read()
+    if len(content) > _MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"{file.filename}: exceeds the 10 MB size limit.")
+    # Validate by magic bytes, not just the client-supplied content_type
+    detected = next(
+        (mime for magic, mime in _MAGIC.items() if content[:len(magic)] == magic),
+        None,
+    )
+    if detected is None or detected not in _ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=400, detail=f"{file.filename}: unsupported file type. Allowed: PDF, JPEG, PNG, WEBP, DOCX.")
+    # Sanitize filename — strip path components, keep only the basename
+    safe_name = (file.filename or "attachment").replace("/", "_").replace("\\", "_").replace("..", "_")
+    return safe_name, detected, content
 
 
 def _role_for_user(db: Session, user: User | None) -> str:
@@ -68,12 +108,13 @@ async def submit_complaint(
     db: Session = Depends(db_session),
 ):
     service = ComplaintService(db)
+    _validate_attachments(attachments)
     attachment_payloads: list[tuple[str, str, bytes]] = []
     attachment_meta: list[dict[str, object]] = []
     for file in attachments:
-        content = await file.read()
-        attachment_payloads.append((file.filename, file.content_type or "application/octet-stream", content))
-        attachment_meta.append({"name": file.filename, "size": len(content), "type": file.content_type or "application/octet-stream"})
+        safe_name, mime, content = await _read_and_validate(file)
+        attachment_payloads.append((safe_name, mime, content))
+        attachment_meta.append({"name": safe_name, "size": len(content), "type": mime})
     draft = {
         "category": category,
         "operator": operator,
@@ -123,6 +164,28 @@ async def add_complaint_message(
     if not message:
         raise HTTPException(status_code=404, detail="Complaint not found")
     return {"success": True, "message": present_complaint_messages([message])[0]}
+
+
+@router.post("/api/complaints/{complaint_id}/action")
+async def officer_complaint_action(
+    complaint_id: str,
+    request: Request,
+    user: User = Depends(require_officer_or_admin),
+    db: Session = Depends(db_session),
+):
+    body = await request.json()
+    action = str(body.get("action", "")).strip().lower()
+    note = str(body.get("note", "")).strip()
+    if not action:
+        raise HTTPException(status_code=400, detail="action is required")
+    try:
+        complaint = ComplaintService(db).officer_action(complaint_id, action=action, officer=user, note=note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    db.commit()
+    return {"success": True, "complaintNumber": complaint.complaint_number, "status": complaint.current_status_code}
 
 
 @router.get("/api/complaints/{complaint_id}/attachments/{attachment_id}")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Iterator
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -10,8 +11,9 @@ from sqlalchemy.orm import Session
 from app.agent.prompt import BOCRA_AGENT_INSTRUCTION
 from app.agent.tools import configure_tool_registry
 from app.config import get_settings
-from app.models.entities import AgentAction, AgentMessage, AgentThread, AgentToolCall, User
-from app.repositories.bocra import AgentRepository, CertificateRepository, KnowledgeRepository
+from app.models.entities import AgentAction, AgentMessage, AgentThread, AgentToolCall, User, WorkflowApplication
+from app.repositories.bocra import AgentRepository, AuthRepository, CertificateRepository, KnowledgeRepository, WorkflowRepository
+from app.services.auth import AuthService
 from app.services.portal import BillingService, ComplaintService, LicensingService, QosService, SearchService, TypeApprovalService
 
 settings = get_settings()
@@ -32,6 +34,7 @@ class AgentService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.repo = AgentRepository(db)
+        self.workflow_repo = WorkflowRepository(db)
         self.knowledge_repo = KnowledgeRepository(db)
         self.search_service = SearchService(db)
         self.complaint_service = ComplaintService(db)
@@ -42,6 +45,7 @@ class AgentService:
         self.certificate_repo = CertificateRepository(db)
         self._runner = None
         self._session_service = None
+        self._current_user: User | None = None
         self._configure_adk()
 
     def _configure_adk(self) -> None:
@@ -126,11 +130,13 @@ class AgentService:
             yield text[index:index + chunk_size]
 
     def _generate_response(self, prompt: str, user: User | None, thread_id: str) -> tuple[str, list[str], list[dict[str, Any]]]:
+        self._current_user = user
         if self._runner and self._session_service and genai_types:
             try:
                 return self._run_adk(prompt, user, thread_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("ADK runner failed, falling back: %s", exc)
         return self._run_fallback(prompt, user, thread_id)
 
     def _run_adk(self, prompt: str, user: User | None, thread_id: str) -> tuple[str, list[str], list[dict[str, Any]]]:
@@ -303,6 +309,13 @@ class AgentService:
             )
         )
 
+    def _role_for_current_user(self) -> str:
+        user = self._current_user
+        if not user:
+            return "public"
+        roles = AuthRepository(self.db).get_roles_for_user(user.id)
+        return AuthService.primary_role(roles)
+
     def _tool_search_knowledge(self, query: str) -> dict[str, Any]:
         chunks = self.knowledge_repo.search_chunks(query, limit=5)
         return {"results": [{"title": document.title, "excerpt": chunk.content} for chunk, document in chunks]}
@@ -319,13 +332,24 @@ class AgentService:
         return {"results": [certificate.certificate_number for certificate in result["certificates"]]}
 
     def _tool_get_qos_by_location(self, location: str) -> dict[str, Any]:
-        return self.qos_service.summary()
+        all_locations = self.qos_service.locations().get("locations", [])
+        matched = next(
+            (loc for loc in all_locations if location.lower() in loc.get("name", "").lower()),
+            None,
+        )
+        summary = self.qos_service.summary()
+        summary["queriedLocation"] = matched["name"] if matched else location
+        return summary
 
     def _tool_get_application_status(self) -> dict[str, Any]:
-        return self.licensing_service.dashboard_data(user=None, role="officer")
+        user = self._current_user
+        role = self._role_for_current_user()
+        return self.licensing_service.dashboard_data(user=user, role=role)
 
     def _tool_list_due_invoices(self) -> dict[str, Any]:
-        invoices = self.billing_service.list_invoices(None, "officer")
+        user = self._current_user
+        role = self._role_for_current_user()
+        invoices = self.billing_service.list_invoices(user, role)
         return {"results": [invoice.invoice_number for invoice in invoices if invoice.status_code in {"UNPAID", "OVERDUE"}]}
 
     def _tool_create_complaint_draft(self, subject: str, description: str, operator: str) -> dict[str, Any]:
@@ -345,17 +369,34 @@ class AgentService:
         return {"complaint_number": complaint.complaint_number}
 
     def _tool_create_application_draft(self, module: str, licence_type: str) -> dict[str, Any]:
+        user = self._current_user
+        now = datetime.now(timezone.utc)
         if module == "licensing":
             result = self.licensing_service.create_application(
                 {
                     "category": "telecommunications",
                     "licenceType": licence_type,
-                    "applicantName": "ADK User",
-                    "applicantEmail": "agent@bocra.demo",
+                    "applicantName": f"{user.first_name} {user.last_name}".strip() if user else "ADK User",
+                    "applicantEmail": user.email if user else "agent@bocra.demo",
                     "coverageArea": "Nationwide",
                     "formData": {},
                 },
-                None,
+                user,
             )
             return {"application_number": result["workflow"].application_number}
-        return {"status": "unsupported"}
+        if module == "type_approval":
+            workflow = WorkflowApplication(
+                application_number=f"APP-{now.year}-{uuid4().hex[:6].upper()}",
+                application_type_code="TYPE_APPROVAL",
+                service_module_code="TYPE_APPROVAL",
+                applicant_user_id=user.id if user else None,
+                title=f"Type Approval — {licence_type}",
+                description="Type approval draft created via BOCRA Copilot.",
+                current_status_code="DRAFT",
+                current_stage_code="INITIATED",
+                submitted_at=now,
+                expected_decision_at=now + timedelta(days=14),
+            )
+            self.workflow_repo.create_application(workflow)
+            return {"application_number": workflow.application_number, "note": "Draft created. Complete device details in the portal."}
+        return {"status": "unsupported", "supported_modules": ["licensing", "type_approval"]}

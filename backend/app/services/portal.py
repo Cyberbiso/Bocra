@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.integrations.qos import DqosClient
@@ -18,6 +19,7 @@ from app.models.entities import (
     DeviceCatalog,
     Invoice,
     LicenseApplication,
+    LicenseRecord,
     Notification,
     Payment,
     Receipt,
@@ -28,6 +30,7 @@ from app.models.entities import (
 )
 from app.repositories.bocra import (
     AgentRepository,
+    AuthRepository,
     BillingRepository,
     CertificateRepository,
     ComplaintRepository,
@@ -38,6 +41,7 @@ from app.repositories.bocra import (
     SearchRepository,
     WorkflowRepository,
 )
+from app.services.auth import AuthService
 
 
 def _utcnow() -> datetime:
@@ -231,7 +235,11 @@ class ComplaintService:
         if not complaint:
             return None
         author_name = f"{user.first_name} {user.last_name}" if user else "Portal User"
-        author_role = "officer" if user and user.email.startswith("officer") else "complainant"
+        if user:
+            roles = AuthRepository(self.db).get_roles_for_user(user.id)
+            author_role = AuthService.primary_role(roles)
+        else:
+            author_role = "complainant"
         message = ComplaintMessage(
             complaint_id=complaint.id,
             author_user_id=user.id if user else None,
@@ -265,6 +273,66 @@ class ComplaintService:
             return None
         return attachment, self.storage.read_bytes(attachment.storage_path)
 
+    def officer_action(
+        self,
+        complaint_id: str,
+        *,
+        action: str,
+        officer: User,
+        note: str = "",
+    ) -> Complaint | None:
+        """Perform approve / reject / remand / assign on a complaint."""
+        complaint = self.repo.get_complaint_by_reference(complaint_id)
+        if not complaint:
+            return None
+
+        action_map = {
+            "approve": ("APPROVED", "Complaint Approved"),
+            "reject": ("REJECTED", "Complaint Rejected"),
+            "remand": ("REMANDED", "Complaint Remanded for Further Information"),
+            "resolve": ("RESOLVED", "Complaint Resolved"),
+            "assign": ("IN_PROGRESS", "Complaint Assigned to Officer"),
+        }
+        if action not in action_map:
+            raise ValueError(f"Unsupported action: {action}")
+
+        new_status, label = action_map[action]
+        complaint.current_status_code = new_status
+        if action == "assign":
+            complaint.assigned_to_user_id = officer.id
+        if action in {"approve", "resolve"}:
+            complaint.resolved_at = _utcnow()
+            complaint.resolution_summary = note or label
+        self.db.flush()
+
+        self.workflow_repo.create_event(
+            WorkflowEvent(
+                resource_kind="complaint",
+                resource_id=complaint.id,
+                event_type_code=f"COMPLAINT_{action.upper()}",
+                label=label,
+                actor_name=f"{officer.first_name} {officer.last_name}".strip(),
+                actor_role="officer",
+                is_visible_to_applicant=True,
+                comment=note or None,
+            )
+        )
+
+        if complaint.complainant_user_id:
+            self.notifications.create(
+                Notification(
+                    user_id=complaint.complainant_user_id,
+                    channel_code="IN_APP",
+                    title=label,
+                    body=f"Your complaint {complaint.complaint_number} has been {new_status.lower().replace('_', ' ')}.",
+                    status_code="SENT",
+                    sent_at=_utcnow(),
+                    source_table="complaints",
+                    source_id=complaint.id,
+                )
+            )
+        return complaint
+
 
 class LicensingService:
     LICENCE_TYPES = [
@@ -280,6 +348,7 @@ class LicensingService:
         self.db = db
         self.repo = LicensingRepository(db)
         self.workflow_repo = WorkflowRepository(db)
+        self.notifications = NotificationRepository(db)
 
     def dashboard_data(self, *, user: User | None, role: str) -> dict[str, Any]:
         user_id = user.id if user and role not in {"officer", "admin"} else None
@@ -305,6 +374,109 @@ class LicensingService:
             "workflow": self.workflow_repo.get_application(application.workflow_application_id),
             "events": self.workflow_repo.list_events_for_resource("licence_application", application.id),
         }
+
+    def tracker(self, reference: str) -> dict[str, Any] | None:
+        """Return journey events for an application by application_number or public_tracker_token."""
+        workflow = self.workflow_repo.get_application_by_number(reference)
+        if not workflow:
+            workflow = self.db.scalar(
+                select(WorkflowApplication).where(WorkflowApplication.public_tracker_token == reference)
+            )
+        if not workflow:
+            return None
+        events = self.workflow_repo.list_events_for_resource(
+            workflow.application_type_code.lower(), workflow.id
+        )
+        return {
+            "applicationNumber": workflow.application_number,
+            "title": workflow.title,
+            "status": workflow.current_status_code,
+            "stage": workflow.current_stage_code,
+            "submittedAt": workflow.submitted_at.isoformat() if workflow.submitted_at else None,
+            "expectedDecisionAt": workflow.expected_decision_at.isoformat() if workflow.expected_decision_at else None,
+            "events": [
+                {
+                    "id": event.id,
+                    "type": event.event_type_code,
+                    "label": event.label,
+                    "actorRole": event.actor_role,
+                    "occurredAt": event.occurred_at.isoformat(),
+                    "comment": event.comment,
+                }
+                for event in events
+                if event.is_visible_to_applicant
+            ],
+        }
+
+    def officer_action(
+        self,
+        application_id: str,
+        *,
+        action: str,
+        officer: User,
+        note: str = "",
+    ) -> WorkflowApplication | None:
+        """Perform approve / reject / remand on a licence application."""
+        workflow = self.workflow_repo.get_application(application_id)
+        if not workflow or workflow.application_type_code != "LICENCE":
+            return None
+
+        action_map = {
+            "approve": ("APPROVED", "APPROVED", "Licence Application Approved"),
+            "reject": ("REJECTED", "REJECTED", "Licence Application Rejected"),
+            "remand": ("PENDING", "REMANDED", "Licence Application Remanded"),
+        }
+        if action not in action_map:
+            raise ValueError(f"Unsupported action: {action}")
+
+        new_status, new_stage, label = action_map[action]
+        workflow.current_status_code = new_status
+        workflow.current_stage_code = new_stage
+        self.db.flush()
+
+        if action == "approve":
+            today = _utcnow().date()
+            lic = LicenseRecord(
+                workflow_application_id=workflow.id,
+                licence_number=f"LIC-{today.year}-{uuid4().hex[:6].upper()}",
+                licence_type=workflow.title,
+                category="LICENSED",
+                status_code="ACTIVE",
+                issue_date=today,
+                expiry_date=today.replace(year=today.year + 2),
+                holder_name=f"{officer.first_name} {officer.last_name}".strip(),
+                assigned_officer_name=f"{officer.first_name} {officer.last_name}".strip(),
+            )
+            self.db.add(lic)
+            self.db.flush()
+
+        self.workflow_repo.create_event(
+            WorkflowEvent(
+                resource_kind="licence_application",
+                resource_id=workflow.id,
+                event_type_code=f"LICENCE_{action.upper()}",
+                label=label,
+                actor_name=f"{officer.first_name} {officer.last_name}".strip(),
+                actor_role="officer",
+                is_visible_to_applicant=True,
+                comment=note or None,
+            )
+        )
+
+        if workflow.applicant_user_id:
+            self.notifications.create(
+                Notification(
+                    user_id=workflow.applicant_user_id,
+                    channel_code="IN_APP",
+                    title=label,
+                    body=f"Your licence application {workflow.application_number} has been {new_status.lower()}.",
+                    status_code="SENT",
+                    sent_at=_utcnow(),
+                    source_table="workflow_applications",
+                    source_id=workflow.id,
+                )
+            )
+        return workflow
 
     def public_action(self, *, action: str | None, params: dict[str, str]) -> Any:
         if action == "types":
@@ -355,6 +527,7 @@ class LicensingService:
             current_stage_code="SUBMITTED",
             submitted_at=_utcnow(),
             expected_decision_at=_utcnow() + timedelta(days=21),
+            public_tracker_token=uuid4().hex,
         )
         self.workflow_repo.create_application(workflow)
         application = LicenseApplication(
@@ -387,6 +560,7 @@ class TypeApprovalService:
         self.db = db
         self.device_repo = DeviceRepository(db)
         self.workflow_repo = WorkflowRepository(db)
+        self.notifications = NotificationRepository(db)
 
     def search_public(self, query: str, page: int, size: int) -> dict[str, Any]:
         matches = self.device_repo.list_type_approvals()
@@ -476,6 +650,79 @@ class TypeApprovalService:
         )
         self.db.commit()
         return {"workflow": workflow, "application": application}
+
+    def officer_action(
+        self,
+        application_id: str,
+        *,
+        action: str,
+        officer: User,
+        note: str = "",
+    ) -> WorkflowApplication | None:
+        """Perform approve / reject / remand on a type approval application."""
+        workflow = self.workflow_repo.get_application(application_id)
+        if not workflow or workflow.application_type_code != "TYPE_APPROVAL":
+            return None
+
+        action_map = {
+            "approve": ("APPROVED", "APPROVED", "Application Approved"),
+            "reject": ("REJECTED", "REJECTED", "Application Rejected"),
+            "remand": ("PENDING", "REMANDED", "Application Remanded"),
+        }
+        if action not in action_map:
+            raise ValueError(f"Unsupported action: {action}")
+
+        new_status, new_stage, label = action_map[action]
+        workflow.current_status_code = new_status
+        workflow.current_stage_code = new_stage
+        self.db.flush()
+
+        if action == "approve":
+            today = _utcnow().date()
+            cert = Certificate(
+                certificate_number=f"TA-{today.year}-{uuid4().hex[:6].upper()}",
+                certificate_type="TYPE_APPROVAL",
+                holder_name=f"{officer.first_name} {officer.last_name}".strip(),
+                device_name=workflow.title,
+                issue_date=today,
+                expiry_date=today.replace(year=today.year + 3),
+                status_code="ACTIVE",
+                qr_token=uuid4().hex,
+                application_id=workflow.id,
+                owner_user_id=workflow.applicant_user_id,
+                issued_by=f"{officer.first_name} {officer.last_name}".strip(),
+                remarks=note or None,
+            )
+            self.db.add(cert)
+            self.db.flush()
+
+        self.workflow_repo.create_event(
+            WorkflowEvent(
+                resource_kind="type_approval_application",
+                resource_id=workflow.id,
+                event_type_code=f"TYPE_APPROVAL_{action.upper()}",
+                label=label,
+                actor_name=f"{officer.first_name} {officer.last_name}".strip(),
+                actor_role="officer",
+                is_visible_to_applicant=True,
+                comment=note or None,
+            )
+        )
+
+        if workflow.applicant_user_id:
+            self.notifications.create(
+                Notification(
+                    user_id=workflow.applicant_user_id,
+                    channel_code="IN_APP",
+                    title=label,
+                    body=f"Your type approval application {workflow.application_number} has been {new_status.lower()}.",
+                    status_code="SENT",
+                    sent_at=_utcnow(),
+                    source_table="workflow_applications",
+                    source_id=workflow.id,
+                )
+            )
+        return workflow
 
 
 class DeviceService:
@@ -638,13 +885,23 @@ class SearchService:
 
 class PublicService:
     def __init__(self, db: Session) -> None:
+        self.db = db
         self.knowledge_repo = KnowledgeRepository(db)
 
     def statistics(self) -> dict[str, Any]:
+        resolved_count = self.db.scalar(
+            select(func.count(Complaint.id)).where(
+                Complaint.current_status_code.in_(["RESOLVED", "CLOSED"])
+            )
+        ) or 0
+        active_licences = self.db.scalar(
+            select(func.count(LicenseRecord.id)).where(LicenseRecord.status_code == "ACTIVE")
+        ) or 0
         return {
             "mobile_subscribers": {"Mascom": 1850000, "Orange": 1600000, "BTC": 850000},
             "internet_penetration": {"2022": 62, "2023": 68, "2024": 74, "2025": 79, "2026": 85},
-            "complaints_resolved": 1245,
+            "complaints_resolved": resolved_count,
+            "active_licences": active_licences,
         }
 
     def chat(self, message: str) -> dict[str, str]:

@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.core.database import get_db
 from app.models.entities import SessionToken, User
 from app.repositories.bocra import AuthRepository
+from app.services.auth import AuthService
 
 settings = get_settings()
 
@@ -56,3 +57,15 @@ def get_optional_user(
     if current is None:
         return None
     return current[1]
+
+
+def require_officer_or_admin(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """Dependency that enforces officer or admin role. Raises 403 for applicants."""
+    roles = AuthRepository(db).get_roles_for_user(user.id)
+    role = AuthService.primary_role(roles)
+    if role not in {"officer", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Officer or admin role required.")
+    return user

@@ -106,6 +106,23 @@ class KnowledgeRepository:
     def list_documents(self) -> list[KnowledgeDocument]:
         return list(self.db.scalars(select(KnowledgeDocument)))
 
+    def get_document_by_source(self, source_url: str) -> KnowledgeDocument | None:
+        return self.db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.source_url == source_url))
+
+    def create_document(self, document: KnowledgeDocument) -> KnowledgeDocument:
+        self.db.add(document)
+        self.db.flush()
+        return document
+
+    def create_chunk(self, chunk: KnowledgeChunk) -> KnowledgeChunk:
+        self.db.add(chunk)
+        self.db.flush()
+        return chunk
+
+    def delete_chunks_for_document(self, document_id: str) -> None:
+        from sqlalchemy import delete as _delete
+        self.db.execute(_delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id))
+
     def search_chunks(self, query: str, limit: int = 5) -> list[tuple[KnowledgeChunk, KnowledgeDocument]]:
         normalized = query.lower().strip()
         if not normalized:
@@ -265,6 +282,9 @@ class LicensingRepository:
 
     def list_licence_records(self, user_id: str | None = None) -> list[LicenseRecord]:
         stmt = select(LicenseRecord).order_by(LicenseRecord.expiry_date.asc())
+        if user_id:
+            stmt = stmt.join(WorkflowApplication, WorkflowApplication.id == LicenseRecord.workflow_application_id)
+            stmt = stmt.where(WorkflowApplication.applicant_user_id == user_id)
         return list(self.db.scalars(stmt))
 
     def get_licence_record(self, record_id: str) -> LicenseRecord | None:
@@ -421,6 +441,17 @@ class NotificationRepository:
         if user_id:
             stmt = stmt.where(Notification.user_id == user_id)
         return list(self.db.scalars(stmt))
+
+    def get(self, notification_id: str) -> Notification | None:
+        return self.db.get(Notification, notification_id)
+
+    def mark_read(self, notification_id: str, user_id: str) -> Notification | None:
+        notification = self.db.get(Notification, notification_id)
+        if not notification or notification.user_id != user_id:
+            return None
+        notification.status_code = "READ"
+        self.db.flush()
+        return notification
 
 
 class SearchRepository:

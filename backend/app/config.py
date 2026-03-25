@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     google_cloud_location: str = Field(default="us-central1", alias="GOOGLE_CLOUD_LOCATION")
     google_application_credentials: str = Field(default="", alias="GOOGLE_APPLICATION_CREDENTIALS")
 
+    cloudinary_cloud_name: str = Field(default="", alias="CLOUDINARY_CLOUD_NAME")
+    cloudinary_api_key: str = Field(default="", alias="CLOUDINARY_API_KEY")
+    cloudinary_api_secret: str = Field(default="", alias="CLOUDINARY_API_SECRET")
+    cloudinary_folder: str = Field(default="bocra", alias="CLOUDINARY_FOLDER")
+
+    customer_portal_url: str = Field(
+        default="https://customerportal.bocra.org.bw/api",
+        alias="CUSTOMER_PORTAL_URL",
+    )
+
     dqos_locations_url: str = Field(
         default="https://dqos.bocra.org.bw/api/locations",
         alias="DQOS_LOCATIONS_URL",

@@ -1,20 +1,55 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.dependencies import db_session, get_optional_session
-from app.models.schemas import LoginRequest
+from app.models.schemas import LoginRequest, RegisterRequest
 from app.services.auth import AuthService
 from app.views.presenters import present_session, present_user
 
 router = APIRouter(tags=["auth"])
 settings = get_settings()
+limiter = Limiter(key_func=get_remote_address)
+
+
+@router.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/minute")
+def register(
+    request: Request,
+    payload: RegisterRequest,
+    response: Response,
+    db: Session = Depends(db_session),
+):
+    service = AuthService(db)
+    result = service.register(
+        email=payload.email,
+        password=payload.password,
+        first_name=payload.firstName,
+        last_name=payload.lastName,
+        phone=payload.phone,
+        national_id=payload.nationalId,
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
+    response.set_cookie(
+        settings.session_cookie_name,
+        result.session.token,
+        httponly=True,
+        samesite="lax",
+        path="/",
+        max_age=settings.session_ttl_hours * 3600,
+    )
+    return present_session(result)
 
 
 @router.post("/api/auth/login")
+@limiter.limit("10/minute")
 def login(
+    request: Request,
     payload: LoginRequest,
     response: Response,
     db: Session = Depends(db_session),

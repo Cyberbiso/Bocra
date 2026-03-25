@@ -315,15 +315,36 @@ def present_licensing_detail(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def present_accreditation(data: dict[str, Any]) -> dict[str, Any]:
-    return data
+    status = str(data.get("status", "NOT_FOUND"))
+    return {
+        "type": data.get("type"),
+        "status": status,
+        "reference": data.get("reference"),
+        "isValid": status == "APPROVED",
+    }
 
 
 def present_type_approval_search(data: dict[str, Any]) -> dict[str, Any]:
-    return data
+    return {
+        "total": data.get("total", 0),
+        "pages": data.get("pages", 1),
+        "currentPage": data.get("currentPage", 0),
+        "content": data.get("content", []),
+    }
 
 
 def present_verification_result(data: dict[str, Any]) -> dict[str, Any]:
-    return data
+    status = str(data.get("status", "NOT_FOUND"))
+    return {
+        "imei": data.get("imei"),
+        "status": status,
+        "verified": status == "VERIFIED",
+        "brand": data.get("brand"),
+        "model": data.get("model"),
+        "typeApprovalNumber": data.get("typeApprovalNumber"),
+        "remarks": data.get("remarks"),
+        "checkedAt": data.get("checkedAt"),
+    }
 
 
 def present_certificates(certificates: list[Certificate]) -> list[dict[str, Any]]:

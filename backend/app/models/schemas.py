@@ -10,6 +10,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    firstName: str = Field(min_length=1)
+    lastName: str = Field(min_length=1)
+    phone: str | None = None
+    nationalId: str | None = None
+
+
 class ComplaintMessageCreate(BaseModel):
     content: str = Field(min_length=1)
     authorId: str | None = None

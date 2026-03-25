@@ -42,20 +42,14 @@ def create_schemas() -> None:
     if not settings.is_postgres:
         return
 
+    # Schema names are a fixed internal whitelist — never derived from user input.
+    _SCHEMAS = frozenset({"iam", "workflow", "complaints", "licensing", "device", "billing", "docs", "knowledge", "agent", "notify", "cirt"})
+
     with engine.begin() as conn:
-        for schema in (
-            "iam",
-            "workflow",
-            "complaints",
-            "licensing",
-            "device",
-            "billing",
-            "docs",
-            "knowledge",
-            "agent",
-            "notify",
-        ):
-            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+        for schema in _SCHEMAS:
+            # Use sqlalchemy.sql.quoted_name to safely quote the identifier.
+            from sqlalchemy.sql import quoted_name
+            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {quoted_name(schema, quote=True)}"))
 
 
 def get_db() -> Iterator[Session]:

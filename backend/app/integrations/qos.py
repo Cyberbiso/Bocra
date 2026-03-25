@@ -116,7 +116,7 @@ class DqosClient:
                 response.raise_for_status()
                 payload = response.json()
                 if payload:
-                    return {"resolvedDate": query_date, **MOCK_SUMMARY, "resolvedDate": query_date}
+                    return {"resolvedDate": query_date, **payload}
             except Exception:
                 continue
         return MOCK_SUMMARY

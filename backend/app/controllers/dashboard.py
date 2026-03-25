@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import db_session, get_current_user
+from app.core.dependencies import db_session, get_current_user, require_officer_or_admin
 from app.models.entities import User
 from app.repositories.bocra import AuthRepository
 from app.services.auth import AuthService
@@ -41,7 +41,7 @@ def activity(limit: int = 5, _: User = Depends(get_current_user), db: Session = 
 
 
 @router.get("/api/officer/queue-summary")
-def queue_summary(_: User = Depends(get_current_user), db: Session = Depends(db_session)):
+def queue_summary(_: User = Depends(require_officer_or_admin), db: Session = Depends(db_session)):
     return present_queue_summary(DashboardService(db).queue_summary())
 
 

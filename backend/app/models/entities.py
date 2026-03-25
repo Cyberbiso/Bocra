@@ -4,8 +4,9 @@ from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Text, Uuid
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Text, Uuid as SAUuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 from app.core.database import Base, fk, schema_args, schema_name
 
@@ -16,6 +17,25 @@ def uuid_str() -> str:
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class Uuid(TypeDecorator):
+    """Use native UUIDs on Postgres and plain text IDs on SQLite for legacy demo data."""
+
+    impl = Text
+    cache_ok = True
+
+    def __init__(self, as_uuid: bool = False) -> None:
+        super().__init__()
+        self.as_uuid = as_uuid
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(SAUuid(as_uuid=self.as_uuid))
+        return dialect.type_descriptor(Text())
+
+    def copy(self, **kw):
+        return Uuid(as_uuid=self.as_uuid)
 
 
 class TimestampMixin:

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from typing import Annotated
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.dependencies import db_session, get_optional_session
+from app.models.entities import User
 from app.models.schemas import LoginRequest
 from app.services.auth import AuthService
 from app.views.presenters import present_session, present_user
@@ -18,9 +19,6 @@ settings = get_settings()
 limiter = Limiter(key_func=get_remote_address)
 
 _COOKIE_MAX_AGE = settings.session_ttl_hours * 3600
-
-DbSession = Annotated[Session, Depends(db_session)]
-OptionalSession = Annotated[tuple | None, Depends(get_optional_session)]
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -36,12 +34,16 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 @router.post("/api/auth/login")
 @limiter.limit("10/minute")
-def login(
+async def login(
     request: Request,
-    payload: LoginRequest,
     response: Response,
-    db: DbSession,
+    db: Session = Depends(db_session),
 ):
+    try:
+        payload = LoginRequest.model_validate(await request.json())
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+
     result = AuthService(db).login(payload.email, payload.password)
     if not result:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
@@ -53,8 +55,8 @@ def login(
 @router.post("/api/auth/logout")
 def logout(
     response: Response,
-    current: OptionalSession,
-    db: DbSession,
+    current: tuple[str, User] | None = Depends(get_optional_session),
+    db: Session = Depends(db_session),
 ):
     access_token = current[0] if current else None
     AuthService(db).logout(access_token)
@@ -64,8 +66,8 @@ def logout(
 
 @router.get("/api/auth/session")
 def session_status(
-    current: OptionalSession,
-    db: DbSession,
+    current: tuple[str, User] | None = Depends(get_optional_session),
+    db: Session = Depends(db_session),
 ):
     if not current:
         return {"authenticated": False}
@@ -78,8 +80,8 @@ def session_status(
 
 @router.get("/api/me")
 def me(
-    current: OptionalSession,
-    db: DbSession,
+    current: tuple[str, User] | None = Depends(get_optional_session),
+    db: Session = Depends(db_session),
 ):
     if not current:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")

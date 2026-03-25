@@ -6,9 +6,12 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import secrets
+
 from app.config import get_settings
 from app.integrations.supabase import SupabaseAuthAdapter
 from app.models.entities import (
+    ExternalSystem,
     Accreditation,
     Certificate,
     Complaint,
@@ -1065,4 +1068,35 @@ def seed_database(db: Session) -> None:
         ),
     ]
     db.add_all(notifications)
+
+    # ── External system integrations ──────────────────────────────────────────
+    _KNOWN_SYSTEMS = [
+        {
+            "system_code": "typeapproval_portal",
+            "name": "Type Approval Portal",
+            "description": "BOCRA Type Approval self-service portal — handles device application submissions and hosts user account registration.",
+            "base_url": "https://typeapproval.bocra.org.bw",
+            "health_endpoint": "/health",
+            "contact_email": "support@bocra.org.bw",
+        },
+    ]
+    existing_codes = set(
+        db.scalars(
+            select(ExternalSystem.system_code).where(
+                ExternalSystem.system_code.in_([s["system_code"] for s in _KNOWN_SYSTEMS])
+            )
+        )
+    )
+    for s in _KNOWN_SYSTEMS:
+        if s["system_code"] not in existing_codes:
+            db.add(ExternalSystem(
+                system_code=s["system_code"],
+                name=s["name"],
+                description=s["description"],
+                base_url=s["base_url"],
+                health_endpoint=s["health_endpoint"],
+                contact_email=s["contact_email"],
+                api_key=f"bocra_{secrets.token_urlsafe(32)}",
+            ))
+
     db.commit()

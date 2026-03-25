@@ -13,6 +13,7 @@ from slowapi.util import get_remote_address
 
 from app.config import get_settings
 from app.controllers.agent import router as agent_router
+from app.controllers.integrations import router as integrations_router
 from app.controllers.cirt import router as cirt_router
 from app.controllers.knowledge import router as knowledge_router
 from app.controllers.auth import router as auth_router
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
         cirt_router,
         knowledge_router,
         notifications_router,
+        integrations_router,
         public_router,
     ):
         app.include_router(router)

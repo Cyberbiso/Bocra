@@ -17,6 +17,7 @@ import {
   BookOpen,
   Bell,
   Settings,
+  PlugZap,
   ChevronLeft,
   ChevronRight,
   X,
@@ -88,7 +89,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'ADMIN',
     minRole: 'officer',
-    items: [{ label: 'Admin & Workflow', icon: Settings, href: '/dashboard/admin' }],
+    items: [
+      { label: 'Admin & Workflow', icon: Settings, href: '/dashboard/admin' },
+      { label: 'Integrations', icon: PlugZap, href: '/dashboard/integrations' },
+    ],
   },
 ]
 

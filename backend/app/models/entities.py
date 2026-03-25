@@ -478,6 +478,25 @@ class AgentAction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class ExternalSystem(Base, TimestampMixin):
+    """External system registered to integrate with the BOCRA platform via API key."""
+
+    __tablename__ = schema_name("iam", "external_systems")
+    __table_args__ = schema_args("iam")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    system_code: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    health_endpoint: Mapped[str] = mapped_column(Text, default="/health")
+    api_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    contact_email: Mapped[str | None] = mapped_column(Text)
+    status_code: Mapped[str] = mapped_column(Text, default="UNKNOWN")
+    last_response_ms: Mapped[int | None] = mapped_column(Integer)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class CyberIncidentReport(Base, TimestampMixin):
     """bw-CIRT cyber incident report submitted by members of the public or licensees."""
 

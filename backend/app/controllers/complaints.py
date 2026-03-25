@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -25,6 +27,7 @@ _ALLOWED_MIME_TYPES = {
     "image/webp",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
 }
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 _MAX_FILES = 5
@@ -35,6 +38,12 @@ _MAGIC = {
     b"\xff\xd8\xff": "image/jpeg",
     b"\x89PNG": "image/png",
     b"RIFF": "image/webp",
+}
+
+_FALLBACK_TYPES_BY_SUFFIX = {
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".txt": "text/plain",
 }
 
 
@@ -52,8 +61,18 @@ async def _read_and_validate(file: UploadFile) -> tuple[str, str, bytes]:
         (mime for magic, mime in _MAGIC.items() if content[:len(magic)] == magic),
         None,
     )
+    if detected is None:
+        suffix = Path(file.filename or "").suffix.lower()
+        fallback_type = _FALLBACK_TYPES_BY_SUFFIX.get(suffix)
+        if fallback_type == "text/plain":
+            try:
+                content.decode("utf-8")
+            except UnicodeDecodeError:
+                fallback_type = None
+        if fallback_type and file.content_type == fallback_type:
+            detected = fallback_type
     if detected is None or detected not in _ALLOWED_MIME_TYPES:
-        raise HTTPException(status_code=400, detail=f"{file.filename}: unsupported file type. Allowed: PDF, JPEG, PNG, WEBP, DOCX.")
+        raise HTTPException(status_code=400, detail=f"{file.filename}: unsupported file type. Allowed: PDF, JPEG, PNG, WEBP, DOC, DOCX, TXT.")
     # Sanitize filename — strip path components, keep only the basename
     safe_name = (file.filename or "attachment").replace("/", "_").replace("\\", "_").replace("..", "_")
     return safe_name, detected, content

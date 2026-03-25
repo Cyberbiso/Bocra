@@ -77,3 +77,14 @@ def require_officer_or_admin(
     if role not in {"officer", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Officer or admin role required.")
     return user
+
+
+def require_admin(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """Dependency that enforces admin role only."""
+    roles = AuthRepository(db).get_roles_for_user(user.id)
+    if AuthService.primary_role(roles) != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required.")
+    return user

@@ -9,14 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import db_session, require_officer_or_admin
+from app.core.dependencies import db_session, require_admin
 from app.core.security import utcnow
 from app.models.entities import ExternalSystem, User
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
 DbSession = Annotated[Session, Depends(db_session)]
-OfficerUser = Annotated[User, Depends(require_officer_or_admin)]
+AdminUser = Annotated[User, Depends(require_admin)]
 
 
 def _present(system: ExternalSystem, mask_key: bool = True) -> dict:
@@ -57,14 +57,14 @@ def _check_health(system: ExternalSystem) -> tuple[str, int | None]:
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("")
-def list_integrations(db: DbSession, _: OfficerUser):
+def list_integrations(db: DbSession, _: AdminUser):
     """List all registered external systems with their last known health status."""
     systems = db.scalars(select(ExternalSystem).order_by(ExternalSystem.name)).all()
     return [_present(s) for s in systems]
 
 
 @router.post("/health/check")
-def check_all_health(db: DbSession, _: OfficerUser):
+def check_all_health(db: DbSession, _: AdminUser):
     """Ping every registered system's health endpoint and update stored status."""
     systems = db.scalars(select(ExternalSystem)).all()
     results = []
@@ -84,7 +84,7 @@ def check_all_health(db: DbSession, _: OfficerUser):
 
 
 @router.post("/{system_code}/health/check")
-def check_single_health(system_code: str, db: DbSession, _: OfficerUser):
+def check_single_health(system_code: str, db: DbSession, _: AdminUser):
     """Ping a single system's health endpoint."""
     system = db.scalar(select(ExternalSystem).where(ExternalSystem.system_code == system_code))
     if not system:
@@ -99,7 +99,7 @@ def check_single_health(system_code: str, db: DbSession, _: OfficerUser):
 
 
 @router.post("/{system_code}/rotate-key")
-def rotate_api_key(system_code: str, db: DbSession, _: OfficerUser):
+def rotate_api_key(system_code: str, db: DbSession, _: AdminUser):
     """Generate a new API key for a registered external system (admin action)."""
     system = db.scalar(select(ExternalSystem).where(ExternalSystem.system_code == system_code))
     if not system:

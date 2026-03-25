@@ -91,6 +91,12 @@ const NAV_GROUPS: NavGroup[] = [
     minRole: 'officer',
     items: [
       { label: 'Admin & Workflow', icon: Settings, href: '/dashboard/admin' },
+    ],
+  },
+  {
+    label: 'SYSTEM',
+    minRole: 'admin',
+    items: [
       { label: 'Integrations', icon: PlugZap, href: '/dashboard/integrations' },
     ],
   },
@@ -166,6 +172,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, onClose }: Sideba
           {/* Desktop collapse toggle */}
           {onToggleCollapse && (
             <button
+              type="button"
               onClick={onToggleCollapse}
               className="hidden md:flex items-center justify-center w-7 h-7 rounded-md hover:bg-white/10 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -181,6 +188,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, onClose }: Sideba
           {/* Mobile close */}
           {onClose && (
             <button
+              type="button"
               onClick={onClose}
               className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-white/10 transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
               aria-label="Close navigation"
@@ -258,8 +266,9 @@ export default function Sidebar({ collapsed, onToggleCollapse, onClose }: Sideba
         {!collapsed && (
           <div className="px-3 pb-2 shrink-0">
             <button
+              type="button"
               onClick={() => dispatch(toggleDemo())}
-              aria-pressed={isDemo}
+              aria-pressed={isDemo ? "true" : "false"}
               className={cn(
                 'w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
@@ -291,6 +300,7 @@ export default function Sidebar({ collapsed, onToggleCollapse, onClose }: Sideba
         {/* ── Sign Out Button ──────────────────────────────────────── */}
         <div className="px-3 pb-2 shrink-0">
           <button
+            type="button"
             onClick={() => void handleSignOut()}
             className={cn(
               'w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-colors',
@@ -331,8 +341,9 @@ export default function Sidebar({ collapsed, onToggleCollapse, onClose }: Sideba
                 {SWITCHER_ROLES.map((r) => (
                   <button
                     key={r}
+                    type="button"
                     onClick={() => setRole(r)}
-                    aria-pressed={role === r}
+                    aria-pressed={role === r ? "true" : "false"}
                     className={cn(
                       'flex-1 py-1.5 px-1 text-[11px] font-medium rounded-md transition-all capitalize',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',

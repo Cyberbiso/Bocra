@@ -38,6 +38,23 @@ class SupabaseAuthAdapter:
             logger.warning("Supabase auth sign-in failed: %s", exc)
         return None
 
+    def sign_up(self, email: str, password: str, metadata: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        if not self.enabled:
+            return None
+        try:
+            response = httpx.post(
+                f"{settings.supabase_url}/auth/v1/signup",
+                json={"email": email, "password": password, "data": metadata or {}},
+                headers={"apikey": settings.supabase_anon_key, "Content-Type": "application/json"},
+                timeout=10.0,
+            )
+            if response.is_success:
+                return response.json()
+            logger.warning("Supabase sign_up error %s: %s", response.status_code, response.text)
+        except httpx.RequestError as exc:
+            logger.warning("Supabase sign_up failed: %s", exc)
+        return None
+
     def get_user(self, access_token: str) -> dict[str, Any] | None:
         if not self.enabled or not access_token:
             return None
@@ -54,6 +71,56 @@ class SupabaseAuthAdapter:
                 return response.json()
         except httpx.RequestError as exc:
             logger.warning("Supabase get_user failed: %s", exc)
+        return None
+
+    def sign_out(self, access_token: str) -> None:
+        if not self.enabled or not access_token:
+            return
+        try:
+            httpx.post(
+                f"{settings.supabase_url}/auth/v1/logout",
+                headers={
+                    "apikey": settings.supabase_anon_key,
+                    "Authorization": f"Bearer {access_token}",
+                },
+                timeout=10.0,
+            )
+        except httpx.RequestError as exc:
+            logger.warning("Supabase sign_out failed: %s", exc)
+
+    def admin_create_user(
+        self,
+        email: str,
+        password: str,
+        *,
+        email_confirm: bool = True,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Create a user via the Supabase Admin API (requires service role key).
+        Used only for seeding — real users register via the external portal."""
+        if not self.enabled or not settings.supabase_service_role_key:
+            return None
+        try:
+            response = httpx.post(
+                f"{settings.supabase_url}/auth/v1/admin/users",
+                json={
+                    "email": email,
+                    "password": password,
+                    "email_confirm": email_confirm,
+                    "user_metadata": metadata or {},
+                },
+                headers={
+                    "apikey": settings.supabase_service_role_key,
+                    "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=15.0,
+            )
+            if response.is_success:
+                return response.json()
+            logger.warning("Supabase admin_create_user error %s: %s", response.status_code, response.text)
+        except httpx.RequestError as exc:
+            logger.error("Supabase admin_create_user failed: %s", exc)
         return None
 
 

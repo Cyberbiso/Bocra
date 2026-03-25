@@ -43,7 +43,7 @@ def _file_size_label(size_bytes: int) -> str:
 def present_session(result: LoginResult) -> dict[str, Any]:
     return {
         "success": True,
-        "session": {"token": result.session.token, "expiresAt": result.session.expires_at.isoformat()},
+        "session": {"token": result.access_token},
         "user": present_user(result.user, result.roles, result.permissions),
     }
 

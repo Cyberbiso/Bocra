@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.core.security import hash_password
+from app.integrations.supabase import SupabaseAuthAdapter
 from app.models.entities import (
     Accreditation,
     Certificate,
@@ -153,39 +153,41 @@ def seed_database(db: Session) -> None:
     db.add_all(organizations.values())
     db.flush()
 
-    users = {
-        "public": User(
-            email="public@bocra.demo",
-            first_name="Public",
-            last_name="User",
-            password_hash=hash_password("Password123!"),
+    # Create seed accounts in Supabase Auth (admin API, no email confirmation needed).
+    # These simulate accounts that would normally be created via the external portal
+    # at typeapproval.bocra.org.bw — all use password: Password123!
+    supabase = SupabaseAuthAdapter()
+    _SEED_PASSWORD = "Password123!"
+    _SEED_ACCOUNTS = [
+        ("public",    "public@bocra.demo",    "Public",  "User",   None,            None),
+        ("applicant", "applicant@bocra.demo", "Naledi",  "Molefe", "+26771234567",  None),
+        ("officer",   "officer@bocra.demo",   "Tebogo",  "Kgosi",  "+26772345678",  None),
+        ("admin",     "admin@bocra.demo",     "Kabelo",  "Mosweu", "+26773456789",  None),
+    ]
+
+    users: dict[str, User] = {}
+    for key, email, first_name, last_name, phone, national_id in _SEED_ACCOUNTS:
+        sb = supabase.admin_create_user(
+            email,
+            _SEED_PASSWORD,
+            email_confirm=True,
+            metadata={"first_name": first_name, "last_name": last_name},
+        )
+        # Use Supabase UUID as user ID so token validation syncs correctly.
+        # Fall back to a fresh UUID if Supabase is unavailable (local dev without keys).
+        user_id = sb["id"] if sb else None
+        user = User(
+            **({"id": user_id} if user_id else {}),
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            phone_e164=phone,
+            national_id=national_id,
+            auth_provider="supabase",
             email_verified_at=now,
-        ),
-        "applicant": User(
-            email="applicant@bocra.demo",
-            first_name="Naledi",
-            last_name="Molefe",
-            phone_e164="+26771234567",
-            password_hash=hash_password("Password123!"),
-            email_verified_at=now,
-        ),
-        "officer": User(
-            email="officer@bocra.demo",
-            first_name="Tebogo",
-            last_name="Kgosi",
-            phone_e164="+26772345678",
-            password_hash=hash_password("Password123!"),
-            email_verified_at=now,
-        ),
-        "admin": User(
-            email="admin@bocra.demo",
-            first_name="Kabelo",
-            last_name="Mosweu",
-            phone_e164="+26773456789",
-            password_hash=hash_password("Password123!"),
-            email_verified_at=now,
-        ),
-    }
+        )
+        users[key] = user
+
     db.add_all(users.values())
     db.flush()
 

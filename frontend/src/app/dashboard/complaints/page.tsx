@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { useDemoAwareQuery } from '@/lib/demo/useDemoAwareQuery'
 import { DEMO_COMPLAINTS_RESPONSE } from '@/lib/demo/seed-data'
@@ -12,8 +12,20 @@ import {
   ChevronsRight,
   Filter,
   AlertCircle,
+  Search,
+  X,
+  RefreshCw,
+  Loader2,
+  CheckCircle2,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { useRoleStore } from '@/lib/stores/role-store'
 import { cn } from '@/lib/utils'
 import ComplaintDialog from '@/components/dashboard/complaints/ComplaintDialog'
@@ -64,6 +76,163 @@ function StatusBadge({ status }: { status: ComplaintStatus }) {
     >
       {status}
     </span>
+  )
+}
+
+// ─── Status label map ─────────────────────────────────────────────────────────
+
+const STATUS_LABELS: Record<ComplaintStatus, string> = {
+  NEW: 'New',
+  ASSIGNED: 'Assigned',
+  PENDING: 'Pending',
+  RESOLVED: 'Resolved',
+  ESCALATED: 'Escalated',
+  CLOSED: 'Closed',
+}
+
+// Status transitions available to officers (from → available to)
+const STATUS_TRANSITIONS: Record<ComplaintStatus, ComplaintStatus[]> = {
+  NEW:       ['ASSIGNED', 'PENDING', 'ESCALATED', 'CLOSED'],
+  ASSIGNED:  ['PENDING', 'RESOLVED', 'ESCALATED', 'CLOSED'],
+  PENDING:   ['ASSIGNED', 'RESOLVED', 'ESCALATED', 'CLOSED'],
+  ESCALATED: ['ASSIGNED', 'RESOLVED', 'CLOSED'],
+  RESOLVED:  ['CLOSED', 'NEW'],
+  CLOSED:    ['NEW'],
+}
+
+// ─── Status Change Dialog ─────────────────────────────────────────────────────
+
+interface StatusChangeDialogProps {
+  complaint: Complaint | null
+  onClose: () => void
+  onChanged: (id: string, status: ComplaintStatus) => void
+}
+
+function StatusChangeDialog({ complaint, onClose, onChanged }: StatusChangeDialogProps) {
+  const [newStatus, setNewStatus] = useState<ComplaintStatus | ''>('')
+  const [note, setNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [done, setDone] = useState(false)
+
+  // Reset state when complaint changes
+  useEffect(() => {
+    if (complaint) {
+      setNewStatus('')
+      setNote('')
+      setDone(false)
+    }
+  }, [complaint])
+
+  if (!complaint) return null
+
+  const options = STATUS_TRANSITIONS[complaint.status] ?? []
+
+  async function handleSubmit() {
+    if (!newStatus) return
+    setSubmitting(true)
+    try {
+      await fetch(`/api/complaints/${complaint!.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, note }),
+      })
+      onChanged(complaint!.id, newStatus)
+      setDone(true)
+      setTimeout(() => { onClose(); setDone(false) }, 800)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const selectCls = 'w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#003580]/20 focus:border-[#003580] transition-colors bg-white'
+  const textCls   = 'w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#003580]/20 focus:border-[#003580] transition-colors resize-none'
+
+  return (
+    <Dialog open={!!complaint} onOpenChange={open => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base font-semibold text-gray-900">
+            Update Complaint Status
+          </DialogTitle>
+          <DialogDescription className="text-sm text-gray-500">
+            <code className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{complaint.caseNumber}</code>
+            {' '}— {complaint.subject.length > 60 ? complaint.subject.slice(0, 60) + '…' : complaint.subject}
+          </DialogDescription>
+        </DialogHeader>
+
+        {done ? (
+          <div className="flex flex-col items-center gap-2 py-6 text-emerald-600">
+            <CheckCircle2 className="w-8 h-8" />
+            <p className="text-sm font-semibold">Status updated successfully</p>
+          </div>
+        ) : (
+          <div className="space-y-4 mt-1">
+            {/* Current status */}
+            <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+              <span className="text-xs text-gray-500 shrink-0">Current Status</span>
+              <StatusBadge status={complaint.status} />
+            </div>
+
+            {/* New status */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                New Status <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={newStatus}
+                onChange={e => setNewStatus(e.target.value as ComplaintStatus)}
+                className={selectCls}
+              >
+                <option value="">— Select new status —</option>
+                {options.map(s => (
+                  <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                ))}
+              </select>
+              {newStatus && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                  <StatusBadge status={complaint.status} />
+                  <span>→</span>
+                  <StatusBadge status={newStatus as ComplaintStatus} />
+                </div>
+              )}
+            </div>
+
+            {/* Officer note */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Officer Note <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <textarea
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                rows={3}
+                placeholder="Add context or rationale for this status change…"
+                className={textCls}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!newStatus || submitting}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#003580] rounded-lg hover:bg-[#002a6e] transition-colors disabled:opacity-50"
+              >
+                {submitting
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Updating…</>
+                  : <><RefreshCw className="w-3.5 h-3.5" />Update Status</>
+                }
+              </button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -229,10 +398,12 @@ interface FilterBarProps {
   operator: string
   dateFrom: string
   dateTo: string
+  query: string
   onStatus: (v: string) => void
   onOperator: (v: string) => void
   onDateFrom: (v: string) => void
   onDateTo: (v: string) => void
+  onQuery: (v: string) => void
 }
 
 function FilterBar({
@@ -240,12 +411,34 @@ function FilterBar({
   operator,
   dateFrom,
   dateTo,
+  query,
   onStatus,
   onOperator,
   onDateFrom,
   onDateTo,
+  onQuery,
 }: FilterBarProps) {
   return (
+    <div className="space-y-3">
+      {/* Search input */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder="Search by case number, subject, or operator…"
+          className="w-full h-10 pl-9 pr-9 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#003580]/20 focus:border-[#003580]/40"
+        />
+        {query && (
+          <button
+            onClick={() => onQuery('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
     <div className="flex flex-wrap items-center gap-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
       <Filter className="w-4 h-4 text-gray-400 shrink-0" />
 
@@ -317,6 +510,7 @@ function FilterBar({
         </button>
       )}
     </div>
+    </div>
   )
 }
 
@@ -331,7 +525,12 @@ export default function ComplaintsPage() {
   const [operator, setOperator] = useState<string>('ALL')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
+
+  // Officer status changes (optimistic)
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, ComplaintStatus>>({})
+  const [statusTarget, setStatusTarget] = useState<Complaint | null>(null)
 
   // Reset to page 1 whenever a filter changes
   const handleFilter = (setter: (v: string) => void) => (v: string) => {
@@ -359,7 +558,17 @@ export default function ComplaintsPage() {
     demoFallback: DEMO_COMPLAINTS_RESPONSE,
   })
 
-  const complaints = data?.data ?? []
+  const rawComplaints = data?.data ?? []
+  const complaints = useMemo(() => {
+    if (!query.trim()) return rawComplaints
+    const q = query.toLowerCase()
+    return rawComplaints.filter(
+      (c) =>
+        c.caseNumber.toLowerCase().includes(q) ||
+        c.subject.toLowerCase().includes(q) ||
+        c.operator.toLowerCase().includes(q),
+    )
+  }, [rawComplaints, query])
   const meta = data?.meta
   const isFetching = false
   const loading = isLoading || isFetching
@@ -387,10 +596,12 @@ export default function ComplaintsPage() {
         operator={operator}
         dateFrom={dateFrom}
         dateTo={dateTo}
+        query={query}
         onStatus={handleFilter(setStatus)}
         onOperator={handleFilter(setOperator)}
         onDateFrom={handleFilter(setDateFrom)}
         onDateTo={handleFilter(setDateTo)}
+        onQuery={(v) => { setQuery(v); setPage(1) }}
       />
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
@@ -421,9 +632,19 @@ export default function ComplaintsPage() {
               ) : complaints.length === 0 ? (
                 <EmptyState />
               ) : (
-                complaints.map((c: Complaint) => (
-                  <ComplaintRow key={c.id} complaint={c} isOfficer={isOfficer} />
-                ))
+                complaints.map((c: Complaint) => {
+                  const merged = statusOverrides[c.id]
+                    ? { ...c, status: statusOverrides[c.id] }
+                    : c
+                  return (
+                    <ComplaintRow
+                      key={c.id}
+                      complaint={merged}
+                      isOfficer={isOfficer}
+                      onChangeStatus={isOfficer ? () => setStatusTarget(merged) : undefined}
+                    />
+                  )
+                })
               )}
             </tbody>
           </table>
@@ -440,6 +661,16 @@ export default function ComplaintsPage() {
           />
         )}
       </div>
+
+      {/* Status change dialog — officer/admin only */}
+      <StatusChangeDialog
+        complaint={statusTarget}
+        onClose={() => setStatusTarget(null)}
+        onChanged={(id, newStatus) => {
+          setStatusOverrides(prev => ({ ...prev, [id]: newStatus }))
+          setStatusTarget(null)
+        }}
+      />
     </div>
   )
 }
@@ -449,9 +680,11 @@ export default function ComplaintsPage() {
 function ComplaintRow({
   complaint: c,
   isOfficer,
+  onChangeStatus,
 }: {
   complaint: Complaint
   isOfficer: boolean
+  onChangeStatus?: () => void
 }) {
   return (
     <tr className="hover:bg-gray-50 transition-colors group">
@@ -480,13 +713,24 @@ function ComplaintRow({
         </Td>
       )}
       <Td className="text-right">
-        <Link
-          href={`/dashboard/complaints/${c.id}`}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#003580] border border-[#003580]/25 rounded-lg hover:bg-[#003580]/5 transition-colors"
-        >
-          <Eye className="w-3.5 h-3.5" />
-          View
-        </Link>
+        <div className="flex items-center justify-end gap-1.5">
+          {isOfficer && onChangeStatus && (
+            <button
+              onClick={onChangeStatus}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Update Status
+            </button>
+          )}
+          <Link
+            href={`/dashboard/complaints/${c.id}`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#003580] border border-[#003580]/25 rounded-lg hover:bg-[#003580]/5 transition-colors"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            View
+          </Link>
+        </div>
       </Td>
     </tr>
   )

@@ -278,6 +278,13 @@ export default function Navbar() {
             </div>
 
             <Link
+              href="/register"
+              className="flex items-center gap-2 px-4 py-2 text-[13px] font-bold text-[#06193e] border border-[#06193e] hover:bg-[#06193e] hover:text-white rounded-lg transition-all"
+            >
+              Register
+            </Link>
+
+            <Link
               href="/login"
               className="flex items-center gap-2 px-4 py-2 text-[13px] font-bold text-white bg-[#06193e] hover:bg-[#027ac6] rounded-lg transition-all shadow-sm"
             >
@@ -348,7 +355,14 @@ export default function Navbar() {
                 </div>
               ))}
 
-              <div className="pt-4 mt-2 border-t border-gray-100">
+              <div className="pt-4 mt-2 border-t border-gray-100 space-y-1">
+                <Link
+                  href="/register"
+                  onClick={() => setIsOpen(false)}
+                  className="flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-[#06193e] hover:text-[#027ac6] rounded-xl hover:bg-blue-50/50 transition-colors"
+                >
+                  Register
+                </Link>
                 <Link
                   href="/login"
                   onClick={() => setIsOpen(false)}

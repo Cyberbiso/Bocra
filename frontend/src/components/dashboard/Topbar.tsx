@@ -24,9 +24,8 @@ interface TopbarProps {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  public: 'Public User',
-  applicant: 'Applicant',
-  officer: 'Officer',
+  applicant: 'Applicant / Requestor',
+  officer: 'BOCRA Officer',
   admin: 'Administrator',
 }
 

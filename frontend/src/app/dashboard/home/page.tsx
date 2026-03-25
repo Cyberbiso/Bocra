@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DashboardRole = 'public' | 'applicant' | 'officer' | 'admin'
+type DashboardRole = 'applicant' | 'officer' | 'admin'
 
 interface ActivityItem {
   id: string
@@ -65,13 +65,6 @@ const SUMMARY_DATA: Record<DashboardRole, {
   reviewQueue?: number
   slaBreaches?: number
 }> = {
-  public: {
-    applications: 0,
-    complaints: 1,
-    invoiceCount: 0,
-    invoiceTotal: 'P 0.00',
-    certificates: 0,
-  },
   applicant: {
     applications: 3,
     complaints: 2,
@@ -274,16 +267,14 @@ export default function DashboardHomePage() {
   const summary = SUMMARY_DATA[role]
 
   const roleBadgeStyle: Record<DashboardRole, string> = {
-    public: 'bg-slate-100 text-slate-700 border-slate-200',
     applicant: 'bg-sky-100 text-sky-700 border-sky-200',
     officer: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     admin: 'bg-rose-100 text-rose-700 border-rose-200',
   }
 
   const roleLabel: Record<DashboardRole, string> = {
-    public: 'Public User',
-    applicant: 'Applicant',
-    officer: 'Regulatory Officer',
+    applicant: 'Applicant / Requestor',
+    officer: 'BOCRA Officer',
     admin: 'Administrator',
   }
 

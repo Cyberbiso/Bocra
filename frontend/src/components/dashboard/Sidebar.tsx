@@ -48,10 +48,9 @@ interface NavGroup {
 }
 
 const ROLE_RANK: Record<DashboardRole, number> = {
-  public: 0,
-  applicant: 1,
-  officer: 2,
-  admin: 3,
+  applicant: 0,
+  officer: 1,
+  admin: 2,
 }
 
 const NAV_GROUPS: NavGroup[] = [
@@ -64,7 +63,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Global Search & Verify', icon: Search, href: '/dashboard/search' },
       { label: 'Complaints', icon: MessageSquareWarning, href: '/dashboard/complaints' },
-      { label: 'Licensing & Spectrum', icon: FileText, href: '/dashboard/licensing' },
+      // { label: 'Licensing & Spectrum', icon: FileText, href: '/dashboard/licensing' },
       { label: 'Type Approval', icon: ShieldCheck, href: '/dashboard/type-approval' },
       { label: 'Device Verification & IMEI', icon: Smartphone, href: '/dashboard/device-verification' },
       { label: 'Certificates & Registers', icon: Award, href: '/dashboard/certificates' },
@@ -103,13 +102,12 @@ const NAV_GROUPS: NavGroup[] = [
 ]
 
 const ROLE_CONFIG: Record<DashboardRole, { label: string; dot: string }> = {
-  public: { label: 'Public', dot: 'bg-slate-400' },
   applicant: { label: 'Applicant', dot: 'bg-sky-400' },
   officer: { label: 'Officer', dot: 'bg-emerald-400' },
   admin: { label: 'Admin', dot: 'bg-rose-400' },
 }
 
-const SWITCHER_ROLES: DashboardRole[] = ['public', 'applicant', 'officer', 'admin']
+const SWITCHER_ROLES: DashboardRole[] = ['applicant', 'officer', 'admin']
 
 // ─── Component ───────────────────────────────────────────────────────────────
 

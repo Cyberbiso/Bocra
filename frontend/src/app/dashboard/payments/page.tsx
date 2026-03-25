@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,6 +16,8 @@ import {
   Check,
   AlertCircle,
   Banknote,
+  Search,
+  X,
 } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -521,14 +523,43 @@ function InvoicesTab({
   paidIds: Set<string>
   onPay: (invoice: Invoice) => void
 }) {
-  const outstanding = invoices.filter((inv) => !paidIds.has(inv.id))
-  const overdue = outstanding.filter((i) => i.status === 'OVERDUE')
-  const totalOwing = outstanding.reduce((s, i) => s + i.amount + i.vat, 0)
+  const [query, setQuery] = useState('')
+  const outstanding = useMemo(() => {
+    const base = invoices.filter((inv) => !paidIds.has(inv.id))
+    if (!query.trim()) return base
+    const q = query.toLowerCase()
+    return base.filter(
+      (inv) =>
+        inv.number.toLowerCase().includes(q) ||
+        inv.application.toLowerCase().includes(q) ||
+        inv.description.toLowerCase().includes(q),
+    )
+  }, [invoices, paidIds, query])
+  const allOutstanding = invoices.filter((inv) => !paidIds.has(inv.id))
+  const overdue = allOutstanding.filter((i) => i.status === 'OVERDUE')
+  const totalOwing = allOutstanding.reduce((s, i) => s + i.amount + i.vat, 0)
 
   return (
     <div className="space-y-4">
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by invoice number, application, or description…"
+          className="w-full h-9 pl-9 pr-9 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
+        />
+        {query && (
+          <button onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
       {/* Summary strip */}
-      {outstanding.length > 0 && (
+      {allOutstanding.length > 0 && (
         <div className="flex flex-wrap gap-3">
           <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 flex items-center gap-2">
             <Banknote className="w-4 h-4 text-gray-400" />
@@ -551,11 +582,16 @@ function InvoicesTab({
         </div>
       )}
 
-      {outstanding.length === 0 ? (
+      {allOutstanding.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-14 gap-2 text-gray-400">
           <CheckCircle2 className="w-8 h-8 text-emerald-400" />
           <p className="text-sm font-medium text-emerald-600">All invoices paid</p>
           <p className="text-xs">No outstanding amounts. Check Payment History for records.</p>
+        </div>
+      ) : outstanding.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-14 gap-2 text-gray-400">
+          <Search className="w-8 h-8" />
+          <p className="text-sm">No invoices match your search.</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -652,6 +688,18 @@ const PAYMENT_STATUS_CONFIG: Record<PaymentStatus, { label: string; icon: React.
 }
 
 function PaymentHistoryTab({ payments }: { payments: PaymentRecord[] }) {
+  const [query, setQuery] = useState('')
+  const filtered = useMemo(() => {
+    if (!query.trim()) return payments
+    const q = query.toLowerCase()
+    return payments.filter(
+      (p) =>
+        p.invoiceNumber.toLowerCase().includes(q) ||
+        p.service.toLowerCase().includes(q) ||
+        p.reference.toLowerCase().includes(q),
+    )
+  }, [payments, query])
+
   if (payments.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-14 gap-2 text-gray-400">
@@ -662,6 +710,22 @@ function PaymentHistoryTab({ payments }: { payments: PaymentRecord[] }) {
   }
 
   return (
+    <div className="space-y-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by invoice number, service, or reference…"
+          className="w-full h-9 pl-9 pr-9 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
+        />
+        {query && (
+          <button onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
     <div className="overflow-x-auto rounded-xl border border-gray-200">
       <table className="w-full text-sm min-w-[800px]">
         <thead>
@@ -676,7 +740,13 @@ function PaymentHistoryTab({ payments }: { payments: PaymentRecord[] }) {
           </tr>
         </thead>
         <tbody>
-          {payments.map((pay) => {
+          {filtered.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="py-12 text-center text-sm text-gray-400">
+                No payments match your search.
+              </td>
+            </tr>
+          ) : filtered.map((pay) => {
             const { label, icon: Icon, cls } = PAYMENT_STATUS_CONFIG[pay.status]
             return (
               <tr key={pay.id} className={cn(
@@ -719,12 +789,25 @@ function PaymentHistoryTab({ payments }: { payments: PaymentRecord[] }) {
         </tbody>
       </table>
     </div>
+    </div>
   )
 }
 
 // ─── Tab 3 — Receipts ─────────────────────────────────────────────────────────
 
 function ReceiptsTab({ receipts }: { receipts: Receipt[] }) {
+  const [query, setQuery] = useState('')
+  const filtered = useMemo(() => {
+    if (!query.trim()) return receipts
+    const q = query.toLowerCase()
+    return receipts.filter(
+      (r) =>
+        r.number.toLowerCase().includes(q) ||
+        r.invoiceNumber.toLowerCase().includes(q) ||
+        r.service.toLowerCase().includes(q),
+    )
+  }, [receipts, query])
+
   if (receipts.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-14 gap-2 text-gray-400">
@@ -735,47 +818,70 @@ function ReceiptsTab({ receipts }: { receipts: Receipt[] }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200">
-      <table className="w-full text-sm min-w-[600px]">
-        <thead>
-          <tr>
-            <Th>Receipt No.</Th>
-            <Th>Invoice No.</Th>
-            <Th>Date</Th>
-            <Th className="min-w-[200px]">Service</Th>
-            <Th className="text-right">Amount</Th>
-            <Th className="text-right">Download</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {receipts.map((rcp) => (
-            <tr key={rcp.id} className="hover:bg-gray-50/60 transition-colors">
-              <Td>
-                <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-700">
-                  {rcp.number}
-                </code>
-              </Td>
-              <Td>
-                <code className="text-xs text-gray-500 font-mono">{rcp.invoiceNumber}</code>
-              </Td>
-              <Td className="text-gray-500 whitespace-nowrap">{rcp.date}</Td>
-              <Td className="text-gray-700">{rcp.service}</Td>
-              <Td className="text-right font-semibold text-gray-800 whitespace-nowrap tabular-nums">
-                {bwp(rcp.amount)}
-              </Td>
-              <Td className="text-right">
-                <button
-                  onClick={() => downloadReceiptText(rcp)}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Download PDF
-                </button>
-              </Td>
+    <div className="space-y-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by receipt number, invoice number, or service…"
+          className="w-full h-9 pl-9 pr-9 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
+        />
+        {query && (
+          <button onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-gray-200">
+        <table className="w-full text-sm min-w-[600px]">
+          <thead>
+            <tr>
+              <Th>Receipt No.</Th>
+              <Th>Invoice No.</Th>
+              <Th>Date</Th>
+              <Th className="min-w-[200px]">Service</Th>
+              <Th className="text-right">Amount</Th>
+              <Th className="text-right">Download</Th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="py-12 text-center text-sm text-gray-400">
+                  No receipts match your search.
+                </td>
+              </tr>
+            ) : filtered.map((rcp) => (
+              <tr key={rcp.id} className="hover:bg-gray-50/60 transition-colors">
+                <Td>
+                  <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-700">
+                    {rcp.number}
+                  </code>
+                </Td>
+                <Td>
+                  <code className="text-xs text-gray-500 font-mono">{rcp.invoiceNumber}</code>
+                </Td>
+                <Td className="text-gray-500 whitespace-nowrap">{rcp.date}</Td>
+                <Td className="text-gray-700">{rcp.service}</Td>
+                <Td className="text-right font-semibold text-gray-800 whitespace-nowrap tabular-nums">
+                  {bwp(rcp.amount)}
+                </Td>
+                <Td className="text-right">
+                  <button
+                    onClick={() => downloadReceiptText(rcp)}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download PDF
+                  </button>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

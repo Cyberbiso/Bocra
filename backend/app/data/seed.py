@@ -99,12 +99,97 @@ def ensure_reference_knowledge_documents(db: Session, now: datetime) -> None:
         )
 
 
+def ensure_type_approval_reviewer_setup(db: Session, now: datetime) -> None:
+    roles = {role.role_code: role for role in db.scalars(select(Role))}
+    if "type_approver" not in roles:
+        reviewer_role = Role(role_code="type_approver", name="Type Approval Reviewer")
+        db.add(reviewer_role)
+        db.flush()
+        roles["type_approver"] = reviewer_role
+
+    required_permissions = {
+        "type_approval.review": ("Review type approval", "type_approval"),
+        "type_approval.comment": ("Comment on type approval", "type_approval"),
+        "type_approval.party.write": ("Manage application parties", "type_approval"),
+        "type_approval.document.upload": ("Upload type approval documents", "type_approval"),
+        "type_approval.document.review": ("Review type approval documents", "type_approval"),
+    }
+    permission_map = {permission.permission_code: permission for permission in db.scalars(select(Permission))}
+    for permission_code, (name, module_code) in required_permissions.items():
+        if permission_code in permission_map:
+            continue
+        permission = Permission(permission_code=permission_code, name=name, module_code=module_code)
+        db.add(permission)
+        db.flush()
+        permission_map[permission_code] = permission
+
+    role_permissions = {
+        "applicant": {
+            "type_approval.comment",
+            "type_approval.party.write",
+            "type_approval.document.upload",
+        },
+        "type_approver": {
+            "dashboard.read",
+            "type_approval.read",
+            "type_approval.review",
+            "type_approval.comment",
+            "type_approval.party.write",
+            "type_approval.document.upload",
+            "type_approval.document.review",
+            "billing.read",
+            "agent.use",
+        },
+        "admin": set(required_permissions),
+    }
+
+    existing_role_permissions = {
+        (role_permission.role_id, role_permission.permission_id)
+        for role_permission in db.scalars(select(RolePermission))
+    }
+    for role_code, permission_codes in role_permissions.items():
+        role = roles.get(role_code)
+        if not role:
+            continue
+        for permission_code in permission_codes:
+            permission = permission_map.get(permission_code)
+            if not permission:
+                continue
+            pair = (role.id, permission.id)
+            if pair in existing_role_permissions:
+                continue
+            db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+            existing_role_permissions.add(pair)
+
+    reviewer = db.scalar(select(User).where(User.email == "approver@bocra.demo"))
+    if not reviewer:
+        reviewer = User(
+            email="approver@bocra.demo",
+            first_name="Boitumelo",
+            last_name="Rre",
+            phone_e164="+26774567890",
+            auth_provider="local",
+            email_verified_at=now,
+        )
+        db.add(reviewer)
+        db.flush()
+
+    reviewer_role = roles["type_approver"]
+    reviewer_assignment = db.scalar(
+        select(UserRole).where(UserRole.user_id == reviewer.id, UserRole.role_id == reviewer_role.id)
+    )
+    if not reviewer_assignment:
+        db.add(UserRole(user_id=reviewer.id, role_id=reviewer_role.id))
+        db.flush()
+
+
 def seed_database(db: Session) -> None:
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     today = date(2026, 3, 24)
     now = datetime(2026, 3, 24, 10, 0, tzinfo=timezone.utc)
 
     if db.scalar(select(User.id).limit(1)):
+        ensure_type_approval_reviewer_setup(db, now)
         ensure_reference_knowledge_documents(db, now)
         db.commit()
         return
@@ -165,6 +250,7 @@ def seed_database(db: Session) -> None:
         ("public",    "public@bocra.demo",    "Public",  "User",   None,            None),
         ("applicant", "applicant@bocra.demo", "Naledi",  "Molefe", "+26771234567",  None),
         ("officer",   "officer@bocra.demo",   "Tebogo",  "Kgosi",  "+26772345678",  None),
+        ("type_approver", "approver@bocra.demo", "Boitumelo", "Rre", "+26774567890", None),
         ("admin",     "admin@bocra.demo",     "Kabelo",  "Mosweu", "+26773456789",  None),
     ]
 
@@ -198,6 +284,7 @@ def seed_database(db: Session) -> None:
         "public": Role(role_code="public", name="Public User"),
         "applicant": Role(role_code="applicant", name="Applicant / Requestor"),
         "officer": Role(role_code="officer", name="BOCRA Officer"),
+        "type_approver": Role(role_code="type_approver", name="Type Approval Reviewer"),
         "admin": Role(role_code="admin", name="Administrator"),
     }
     db.add_all(roles.values())
@@ -211,6 +298,11 @@ def seed_database(db: Session) -> None:
         Permission(permission_code="licensing.write", name="Write licensing", module_code="licensing"),
         Permission(permission_code="type_approval.read", name="Read type approval", module_code="type_approval"),
         Permission(permission_code="type_approval.write", name="Write type approval", module_code="type_approval"),
+        Permission(permission_code="type_approval.review", name="Review type approval", module_code="type_approval"),
+        Permission(permission_code="type_approval.comment", name="Comment on type approval", module_code="type_approval"),
+        Permission(permission_code="type_approval.party.write", name="Manage application parties", module_code="type_approval"),
+        Permission(permission_code="type_approval.document.upload", name="Upload type approval documents", module_code="type_approval"),
+        Permission(permission_code="type_approval.document.review", name="Review type approval documents", module_code="type_approval"),
         Permission(permission_code="billing.read", name="Read billing", module_code="billing"),
         Permission(permission_code="billing.write", name="Write billing", module_code="billing"),
         Permission(permission_code="agent.use", name="Use AI agent", module_code="agent"),
@@ -236,6 +328,9 @@ def seed_database(db: Session) -> None:
             "licensing.write",
             "type_approval.read",
             "type_approval.write",
+            "type_approval.comment",
+            "type_approval.party.write",
+            "type_approval.document.upload",
             "billing.read",
             "agent.use",
         ],
@@ -249,9 +344,22 @@ def seed_database(db: Session) -> None:
             "licensing.read",
             "licensing.write",
             "type_approval.read",
-            "type_approval.write",
             "billing.read",
             "billing.write",
+            "agent.use",
+        ],
+    )
+    bind_permissions(
+        "type_approver",
+        [
+            "dashboard.read",
+            "type_approval.read",
+            "type_approval.review",
+            "type_approval.comment",
+            "type_approval.party.write",
+            "type_approval.document.upload",
+            "type_approval.document.review",
+            "billing.read",
             "agent.use",
         ],
     )
@@ -265,6 +373,11 @@ def seed_database(db: Session) -> None:
             "licensing.write",
             "type_approval.read",
             "type_approval.write",
+            "type_approval.review",
+            "type_approval.comment",
+            "type_approval.party.write",
+            "type_approval.document.upload",
+            "type_approval.document.review",
             "billing.read",
             "billing.write",
             "agent.use",
@@ -277,6 +390,7 @@ def seed_database(db: Session) -> None:
             UserRole(user_id=users["public"].id, role_id=roles["public"].id),
             UserRole(user_id=users["applicant"].id, role_id=roles["applicant"].id, organization_id=organizations["bottel"].id),
             UserRole(user_id=users["officer"].id, role_id=roles["officer"].id),
+            UserRole(user_id=users["type_approver"].id, role_id=roles["type_approver"].id),
             UserRole(user_id=users["admin"].id, role_id=roles["admin"].id),
         ]
     )
@@ -1099,4 +1213,5 @@ def seed_database(db: Session) -> None:
                 api_key=f"bocra_{secrets.token_urlsafe(32)}",
             ))
 
+    ensure_type_approval_reviewer_setup(db, now)
     db.commit()

@@ -13,6 +13,7 @@ from app.models.entities import (
     AgentMessage,
     AgentThread,
     AgentToolCall,
+    AuditLog,
     Certificate,
     Complaint,
     ComplaintAttachment,
@@ -20,7 +21,9 @@ from app.models.entities import (
     ComplaintMessage,
     DeviceCatalog,
     DeviceVerificationItem,
+    DocumentFile,
     Invoice,
+    InvoiceItem,
     KnowledgeChunk,
     KnowledgeDocument,
     LicenseApplication,
@@ -38,6 +41,11 @@ from app.models.entities import (
     User,
     UserRole,
     WorkflowApplication,
+    WorkflowApplicationDocument,
+    WorkflowApplicationComment,
+    WorkflowApplicationParty,
+    WorkflowApplicationStatusHistory,
+    WorkflowApplicationTask,
     WorkflowEvent,
 )
 
@@ -88,6 +96,27 @@ class AuthRepository:
             .where(RolePermission.role_id.in_(role_ids))
         )
         return list(self.db.scalars(stmt))
+
+    def get_role_by_code(self, role_code: str) -> Role | None:
+        return self.db.scalar(select(Role).where(Role.role_code == role_code))
+
+    def get_user_role_assignments(self, user_id: str) -> list[UserRole]:
+        stmt = select(UserRole).where(UserRole.user_id == user_id).order_by(UserRole.effective_from.asc())
+        return list(self.db.scalars(stmt))
+
+    def get_primary_organization_id(self, user_id: str | None) -> str | None:
+        if not user_id:
+            return None
+        assignments = self.get_user_role_assignments(user_id)
+        for assignment in assignments:
+            if assignment.organization_id:
+                return assignment.organization_id
+        return None
+
+    def get_organization_by_id(self, organization_id: str | None) -> Organization | None:
+        if not organization_id:
+            return None
+        return self.db.get(Organization, organization_id)
 
 
 class KnowledgeRepository:
@@ -176,6 +205,105 @@ class WorkflowRepository:
         self.db.add(event)
         self.db.flush()
         return event
+
+    def create_status_history(self, history: WorkflowApplicationStatusHistory) -> WorkflowApplicationStatusHistory:
+        self.db.add(history)
+        self.db.flush()
+        return history
+
+    def list_status_history(self, application_id: str) -> list[WorkflowApplicationStatusHistory]:
+        stmt = (
+            select(WorkflowApplicationStatusHistory)
+            .where(WorkflowApplicationStatusHistory.application_id == application_id)
+            .order_by(WorkflowApplicationStatusHistory.changed_at.asc())
+        )
+        return list(self.db.scalars(stmt))
+
+    def create_task(self, task: WorkflowApplicationTask) -> WorkflowApplicationTask:
+        self.db.add(task)
+        self.db.flush()
+        return task
+
+    def list_tasks(self, application_id: str, *, open_only: bool = False) -> list[WorkflowApplicationTask]:
+        stmt = select(WorkflowApplicationTask).where(WorkflowApplicationTask.application_id == application_id)
+        if open_only:
+            stmt = stmt.where(WorkflowApplicationTask.task_status_code == "OPEN")
+        stmt = stmt.order_by(WorkflowApplicationTask.created_at.asc())
+        return list(self.db.scalars(stmt))
+
+    def complete_open_tasks(self, application_id: str, *, note: str = "") -> list[WorkflowApplicationTask]:
+        tasks = self.list_tasks(application_id, open_only=True)
+        if not tasks:
+            return []
+        completed_at = datetime.now(timezone.utc)
+        for task in tasks:
+            task.task_status_code = "COMPLETED"
+            task.completed_at = completed_at
+            if note:
+                task.notes = note
+            self.db.add(task)
+        self.db.flush()
+        return tasks
+
+    def list_documents(self, application_id: str) -> list[tuple[WorkflowApplicationDocument, DocumentFile]]:
+        stmt = (
+            select(WorkflowApplicationDocument, DocumentFile)
+            .join(DocumentFile, DocumentFile.id == WorkflowApplicationDocument.file_id)
+            .where(WorkflowApplicationDocument.application_id == application_id)
+            .order_by(WorkflowApplicationDocument.created_at.asc())
+        )
+        return list(self.db.execute(stmt).all())
+
+    def get_document(self, application_id: str, document_id: str) -> tuple[WorkflowApplicationDocument, DocumentFile] | None:
+        stmt = (
+            select(WorkflowApplicationDocument, DocumentFile)
+            .join(DocumentFile, DocumentFile.id == WorkflowApplicationDocument.file_id)
+            .where(
+                WorkflowApplicationDocument.application_id == application_id,
+                WorkflowApplicationDocument.id == document_id,
+            )
+        )
+        return self.db.execute(stmt).first()
+
+    def create_file(self, file: DocumentFile) -> DocumentFile:
+        self.db.add(file)
+        self.db.flush()
+        return file
+
+    def create_document(self, document: WorkflowApplicationDocument) -> WorkflowApplicationDocument:
+        self.db.add(document)
+        self.db.flush()
+        return document
+
+    def create_comment(self, comment: WorkflowApplicationComment) -> WorkflowApplicationComment:
+        self.db.add(comment)
+        self.db.flush()
+        return comment
+
+    def list_comments(
+        self,
+        application_id: str,
+        *,
+        include_internal: bool = True,
+    ) -> list[WorkflowApplicationComment]:
+        stmt = select(WorkflowApplicationComment).where(WorkflowApplicationComment.application_id == application_id)
+        if not include_internal:
+            stmt = stmt.where(WorkflowApplicationComment.visibility_code != "INTERNAL")
+        stmt = stmt.order_by(WorkflowApplicationComment.created_at.asc())
+        return list(self.db.scalars(stmt))
+
+    def create_party(self, party: WorkflowApplicationParty) -> WorkflowApplicationParty:
+        self.db.add(party)
+        self.db.flush()
+        return party
+
+    def list_parties(self, application_id: str) -> list[WorkflowApplicationParty]:
+        stmt = (
+            select(WorkflowApplicationParty)
+            .where(WorkflowApplicationParty.application_id == application_id)
+            .order_by(WorkflowApplicationParty.created_at.asc())
+        )
+        return list(self.db.scalars(stmt))
 
     def list_events_for_resource(self, resource_kind: str, resource_id: str) -> list[WorkflowEvent]:
         stmt = (
@@ -297,8 +425,70 @@ class LicensingRepository:
             stmt = stmt.where(WorkflowApplication.applicant_user_id == user_id)
         return list(self.db.scalars(stmt))
 
+    def list_license_applications_with_workflow(
+        self,
+        *,
+        role: str,
+        user_id: str | None,
+        status: str | None,
+        query: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[tuple[LicenseApplication, WorkflowApplication]], int]:
+        stmt = (
+            select(LicenseApplication, WorkflowApplication)
+            .join(WorkflowApplication, WorkflowApplication.id == LicenseApplication.workflow_application_id)
+        )
+        count_stmt = (
+            select(func.count())
+            .select_from(LicenseApplication)
+            .join(WorkflowApplication, WorkflowApplication.id == LicenseApplication.workflow_application_id)
+        )
+        conditions = []
+        if role not in {"officer", "admin"} and user_id:
+            conditions.append(WorkflowApplication.applicant_user_id == user_id)
+        if status and status != "ALL":
+            conditions.append(WorkflowApplication.current_status_code == status)
+        if query:
+            q = f"%{query.lower()}%"
+            conditions.append(
+                or_(
+                    func.lower(WorkflowApplication.application_number).like(q),
+                    func.lower(WorkflowApplication.title).like(q),
+                    func.lower(LicenseApplication.licence_type_name).like(q),
+                    func.lower(LicenseApplication.applicant_name).like(q),
+                )
+            )
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+            count_stmt = count_stmt.where(and_(*conditions))
+        total = int(self.db.scalar(count_stmt) or 0)
+        stmt = (
+            stmt.order_by(WorkflowApplication.created_at.desc())
+            .offset(max(0, page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(self.db.execute(stmt).all()), total
+
     def get_license_application(self, application_id: str) -> LicenseApplication | None:
         return self.db.get(LicenseApplication, application_id)
+
+    def get_license_application_by_reference(
+        self,
+        reference: str,
+    ) -> tuple[LicenseApplication, WorkflowApplication] | None:
+        stmt = (
+            select(LicenseApplication, WorkflowApplication)
+            .join(WorkflowApplication, WorkflowApplication.id == LicenseApplication.workflow_application_id)
+            .where(
+                or_(
+                    LicenseApplication.id == reference,
+                    WorkflowApplication.id == reference,
+                    WorkflowApplication.application_number == reference,
+                )
+            )
+        )
+        return self.db.execute(stmt).first()
 
     def create_license_application(self, application: LicenseApplication) -> LicenseApplication:
         self.db.add(application)
@@ -320,6 +510,71 @@ class DeviceRepository:
 
     def list_type_approvals(self) -> list[TypeApprovalRecord]:
         return list(self.db.scalars(select(TypeApprovalRecord).order_by(TypeApprovalRecord.created_at.desc())))
+
+    def list_type_approval_applications(
+        self,
+        *,
+        role: str,
+        user_id: str | None,
+        status: str | None,
+        query: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[tuple[TypeApprovalApplication, WorkflowApplication, DeviceCatalog]], int]:
+        stmt = (
+            select(TypeApprovalApplication, WorkflowApplication, DeviceCatalog)
+            .join(WorkflowApplication, WorkflowApplication.id == TypeApprovalApplication.workflow_application_id)
+            .join(DeviceCatalog, DeviceCatalog.id == TypeApprovalApplication.device_model_id)
+        )
+        count_stmt = (
+            select(func.count())
+            .select_from(TypeApprovalApplication)
+            .join(WorkflowApplication, WorkflowApplication.id == TypeApprovalApplication.workflow_application_id)
+            .join(DeviceCatalog, DeviceCatalog.id == TypeApprovalApplication.device_model_id)
+        )
+        conditions = []
+        if role not in {"type_approver", "admin"} and user_id:
+            conditions.append(WorkflowApplication.applicant_user_id == user_id)
+        if status and status != "ALL":
+            conditions.append(WorkflowApplication.current_status_code == status)
+        if query:
+            q = f"%{query.lower()}%"
+            conditions.append(
+                or_(
+                    func.lower(WorkflowApplication.application_number).like(q),
+                    func.lower(WorkflowApplication.title).like(q),
+                    func.lower(DeviceCatalog.brand_name).like(q),
+                    func.lower(DeviceCatalog.model_name).like(q),
+                )
+            )
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+            count_stmt = count_stmt.where(and_(*conditions))
+        total = int(self.db.scalar(count_stmt) or 0)
+        stmt = (
+            stmt.order_by(WorkflowApplication.created_at.desc())
+            .offset(max(0, page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(self.db.execute(stmt).all()), total
+
+    def get_type_approval_application(
+        self,
+        reference: str,
+    ) -> tuple[TypeApprovalApplication, WorkflowApplication, DeviceCatalog] | None:
+        stmt = (
+            select(TypeApprovalApplication, WorkflowApplication, DeviceCatalog)
+            .join(WorkflowApplication, WorkflowApplication.id == TypeApprovalApplication.workflow_application_id)
+            .join(DeviceCatalog, DeviceCatalog.id == TypeApprovalApplication.device_model_id)
+            .where(
+                or_(
+                    TypeApprovalApplication.id == reference,
+                    WorkflowApplication.id == reference,
+                    WorkflowApplication.application_number == reference,
+                )
+            )
+        )
+        return self.db.execute(stmt).first()
 
     def get_device(self, device_id: str) -> DeviceCatalog | None:
         return self.db.get(DeviceCatalog, device_id)
@@ -349,6 +604,11 @@ class DeviceRepository:
         )
         return self.db.scalar(stmt)
 
+    def get_accreditation_by_id(self, accreditation_id: str | None) -> Accreditation | None:
+        if not accreditation_id:
+            return None
+        return self.db.get(Accreditation, accreditation_id)
+
     def create_type_approval_application(
         self,
         application: TypeApprovalApplication,
@@ -356,6 +616,10 @@ class DeviceRepository:
         self.db.add(application)
         self.db.flush()
         return application
+
+    def get_type_approval_record_by_application(self, application_id: str) -> TypeApprovalRecord | None:
+        stmt = select(TypeApprovalRecord).where(TypeApprovalRecord.application_id == application_id)
+        return self.db.scalar(stmt)
 
     def list_verification_items(self) -> list[DeviceVerificationItem]:
         return list(self.db.scalars(select(DeviceVerificationItem)))
@@ -378,6 +642,14 @@ class CertificateRepository:
         stmt = stmt.order_by(Certificate.issue_date.desc())
         return list(self.db.scalars(stmt))
 
+    def list_for_application(self, application_id: str) -> list[Certificate]:
+        stmt = (
+            select(Certificate)
+            .where(Certificate.application_id == application_id)
+            .order_by(Certificate.issue_date.desc())
+        )
+        return list(self.db.scalars(stmt))
+
     def get_by_qr_token(self, token: str) -> Certificate | None:
         return self.db.scalar(select(Certificate).where(Certificate.qr_token == token))
 
@@ -390,6 +662,22 @@ class BillingRepository:
         stmt = select(Invoice).order_by(Invoice.due_date.asc())
         if user_id:
             stmt = stmt.where(or_(Invoice.owner_user_id == user_id, Invoice.owner_user_id.is_(None)))
+        return list(self.db.scalars(stmt))
+
+    def list_invoices_for_application(self, application_id: str) -> list[Invoice]:
+        stmt = (
+            select(Invoice)
+            .where(Invoice.application_id == application_id)
+            .order_by(Invoice.due_date.asc())
+        )
+        return list(self.db.scalars(stmt))
+
+    def list_invoice_items(self, invoice_id: str) -> list[InvoiceItem]:
+        stmt = (
+            select(InvoiceItem)
+            .where(InvoiceItem.invoice_id == invoice_id)
+            .order_by(InvoiceItem.line_no.asc())
+        )
         return list(self.db.scalars(stmt))
 
     def list_payments(self, user_id: str | None = None) -> list[Payment]:
@@ -410,6 +698,16 @@ class BillingRepository:
 
     def get_invoice(self, invoice_id: str) -> Invoice | None:
         return self.db.get(Invoice, invoice_id)
+
+    def create_invoice(self, invoice: Invoice) -> Invoice:
+        self.db.add(invoice)
+        self.db.flush()
+        return invoice
+
+    def create_invoice_item(self, invoice_item: InvoiceItem) -> InvoiceItem:
+        self.db.add(invoice_item)
+        self.db.flush()
+        return invoice_item
 
     def create_payment(self, payment: Payment) -> Payment:
         self.db.add(payment)
@@ -555,3 +853,13 @@ class AgentRepository:
         self.db.add(action)
         self.db.flush()
         return action
+
+
+class AuditRepository:
+    def __init__(self, db: Session) -> None:
+        self.db = db
+
+    def create_log(self, log: AuditLog) -> AuditLog:
+        self.db.add(log)
+        self.db.flush()
+        return log

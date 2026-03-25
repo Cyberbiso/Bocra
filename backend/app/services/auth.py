@@ -10,7 +10,7 @@ from app.models.entities import Role, SessionToken, User, UserRole, uuid_str
 from app.repositories.bocra import AuthRepository
 
 
-ROLE_PRIORITY = {"public": 0, "applicant": 1, "officer": 2, "admin": 3}
+ROLE_PRIORITY = {"public": 0, "applicant": 1, "officer": 2, "type_approver": 3, "admin": 4}
 
 
 @dataclass(slots=True)

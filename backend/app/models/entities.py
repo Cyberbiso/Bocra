@@ -170,6 +170,75 @@ class WorkflowEvent(Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
 
+class WorkflowApplicationStatusHistory(Base):
+    __tablename__ = schema_name("workflow", "application_status_history")
+    __table_args__ = schema_args("workflow")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    application_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("workflow", "applications", "id")), nullable=False)
+    from_status_code: Mapped[str | None] = mapped_column(Text)
+    to_status_code: Mapped[str] = mapped_column(Text, nullable=False)
+    changed_by_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "users", "id")))
+    comment: Mapped[str | None] = mapped_column(Text)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class WorkflowApplicationTask(Base, TimestampMixin):
+    __tablename__ = schema_name("workflow", "application_tasks")
+    __table_args__ = schema_args("workflow")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    application_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("workflow", "applications", "id")), nullable=False)
+    task_type_code: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    assigned_to_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "users", "id")))
+    task_status_code: Mapped[str] = mapped_column(Text, default="OPEN")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+
+class WorkflowApplicationDocument(Base):
+    __tablename__ = schema_name("workflow", "application_documents")
+    __table_args__ = schema_args("workflow")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    application_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("workflow", "applications", "id")), nullable=False)
+    file_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("docs", "files", "id")), nullable=False)
+    document_type_code: Mapped[str] = mapped_column(Text, nullable=False)
+    is_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    review_status_code: Mapped[str] = mapped_column(Text, default="PENDING")
+    uploaded_by_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "users", "id")))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class WorkflowApplicationComment(Base):
+    __tablename__ = schema_name("workflow", "application_comments")
+    __table_args__ = schema_args("workflow")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    application_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("workflow", "applications", "id")), nullable=False)
+    author_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "users", "id")))
+    visibility_code: Mapped[str] = mapped_column(Text, default="INTERNAL")
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class WorkflowApplicationParty(Base):
+    __tablename__ = schema_name("workflow", "application_parties")
+    __table_args__ = schema_args("workflow")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    application_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("workflow", "applications", "id")), nullable=False)
+    party_type_code: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "organizations", "id")))
+    contact_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "users", "id")))
+    display_name: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class ComplaintCategory(Base):
     __tablename__ = schema_name("complaints", "categories")
     __table_args__ = schema_args("complaints")
@@ -322,6 +391,32 @@ class TypeApprovalRecord(Base, TimestampMixin):
     applicant_name: Mapped[str | None] = mapped_column(Text)
 
 
+class DeviceVerificationBatch(Base, TimestampMixin):
+    __tablename__ = schema_name("device", "device_verification_batches")
+    __table_args__ = schema_args("device")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    batch_reference: Mapped[str] = mapped_column(Text, nullable=False)
+    applicant_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "users", "id")))
+    applicant_org_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "organizations", "id")))
+    device_model_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("device", "catalog", "id")))
+    import_period_start: Mapped[date | None] = mapped_column(Date)
+    import_period_end: Mapped[date | None] = mapped_column(Date)
+    status_code: Mapped[str] = mapped_column(Text, default="UPLOADED")
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+
+class DeviceVerificationCertificate(Base):
+    __tablename__ = schema_name("device", "device_verification_certificates")
+    __table_args__ = schema_args("device")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    batch_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("device", "device_verification_batches", "id")), nullable=False)
+    certificate_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("docs", "certificates", "id")), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class DeviceVerificationItem(Base):
     __tablename__ = schema_name("device", "verification_items")
     __table_args__ = schema_args("device")
@@ -335,6 +430,22 @@ class DeviceVerificationItem(Base):
     remarks: Mapped[str | None] = mapped_column(Text)
     response_payload_json: Mapped[dict[str, Any]] = mapped_column("response_payload", JSON, default=dict)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class DocumentFile(Base):
+    __tablename__ = schema_name("docs", "files")
+    __table_args__ = schema_args("docs")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    storage_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    mime_type: Mapped[str] = mapped_column(Text, nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    checksum_sha256: Mapped[str | None] = mapped_column(Text)
+    uploaded_by_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "users", "id")))
+    source_module_code: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
@@ -374,6 +485,22 @@ class Invoice(Base, TimestampMixin):
     total_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
     status_code: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class InvoiceItem(Base):
+    __tablename__ = schema_name("billing", "invoice_items")
+    __table_args__ = schema_args("billing")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    invoice_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("billing", "invoices", "id")), nullable=False)
+    line_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_code: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[float] = mapped_column(Numeric(12, 2), default=1)
+    unit_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    line_total_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
 class Payment(Base):
@@ -495,6 +622,23 @@ class AgentAction(Base):
     target_table: Mapped[str] = mapped_column(Text, nullable=False)
     target_id: Mapped[str | None] = mapped_column(Text)
     confirmation_state: Mapped[str] = mapped_column(Text, default="EXECUTED")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class AuditLog(Base):
+    __tablename__ = schema_name("audit", "audit_logs")
+    __table_args__ = schema_args("audit")
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_str)
+    actor_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey(fk("iam", "users", "id")))
+    action_code: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_table: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_id: Mapped[str] = mapped_column(Text, nullable=False)
+    before_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    after_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    ip_address: Mapped[str | None] = mapped_column(Text)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 

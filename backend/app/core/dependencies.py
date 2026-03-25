@@ -79,6 +79,18 @@ def require_officer_or_admin(
     return user
 
 
+def require_type_approver_or_admin(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """Dependency that enforces dedicated type approval reviewer access."""
+    roles = AuthRepository(db).get_roles_for_user(user.id)
+    role = AuthService.primary_role(roles)
+    if role not in {"type_approver", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Type approver or admin role required.")
+    return user
+
+
 def require_admin(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

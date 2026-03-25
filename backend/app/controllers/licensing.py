@@ -52,6 +52,32 @@ def list_or_search_licenses(
     return present_licensing_dashboard(service.dashboard_data(user=user, role=role))
 
 
+@router.get("/api/licence-applications")
+def list_licence_applications(
+    status: str | None = None,
+    q: str | None = None,
+    page: int = 1,
+    size: int = 10,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(db_session),
+):
+    role = _role_for_user(db, user)
+    return LicensingService(db).list_applications(user=user, role=role, status=status, query=q, page=page, page_size=size)
+
+
+@router.get("/api/licence-applications/{reference}")
+def licence_application_detail(
+    reference: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(db_session),
+):
+    role = _role_for_user(db, user)
+    detail = LicensingService(db).application_detail(reference, user=user, role=role)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Licence application not found")
+    return detail
+
+
 @router.get("/api/licenses/{record_id}")
 def license_detail(record_id: str, db: Session = Depends(db_session)):
     detail = LicensingService(db).detail(record_id)

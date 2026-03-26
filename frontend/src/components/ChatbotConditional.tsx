@@ -1,12 +1,14 @@
-'use client'
+"use client";
 
-import { usePathname } from 'next/navigation'
-import Chatbot from './Chatbot'
+import { usePathname } from "next/navigation";
+import Chatbot from "@/components/Chatbot";
 
 export default function ChatbotConditional() {
-  const pathname = usePathname()
+  const pathname = usePathname();
 
-  if (pathname.startsWith('/dashboard')) return null
+  if (pathname.startsWith("/dashboard")) {
+    return null;
+  }
 
-  return <Chatbot />
+  return <Chatbot />;
 }

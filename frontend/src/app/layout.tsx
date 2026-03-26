@@ -57,6 +57,7 @@ export default function RootLayout({
             </main>
             <ChatbotConditional />
             <FooterConditional />
+            <ChatbotConditional />
           </div>
         </Providers>
       </body>

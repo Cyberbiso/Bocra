@@ -239,22 +239,21 @@ export async function POST(request: NextRequest) {
             entry.content.trim().length > 0,
         )
       : [];
-
     const structuredHelp = !hasComplaintDraftContent(complaintDraft)
-      ? buildStructuredPublicChatReply(message)
+      ? buildStructuredPublicChatReply(message, history)
       : null;
 
     if (structuredHelp) {
       return NextResponse.json({
         reply: structuredHelp.reply,
         complaintFlowActive: false,
+        navigationActions: structuredHelp.actions,
+        ...buildBaseResponse(complaintDraft, attachments),
         missingFields: [],
         readyToSubmit: false,
         shouldSubmitComplaint: false,
         awaitingConfirmation: false,
         reviewSummary: null,
-        navigationActions: structuredHelp.actions,
-        ...buildBaseResponse(complaintDraft, attachments),
       });
     }
 
@@ -397,7 +396,7 @@ export async function POST(request: NextRequest) {
       awaitingConfirmation,
       reviewSummary: readyToSubmit
         ? createComplaintReviewSummary(mergedComplaintDraft, attachments.length)
-        : null,
+          : null,
       navigationActions,
       ...buildBaseResponse(mergedComplaintDraft, attachments),
     });

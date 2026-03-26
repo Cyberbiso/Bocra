@@ -26,13 +26,15 @@ export async function backendFetch(
   init: BackendFetchInit = {},
 ): Promise<Response> {
   const url = `${BACKEND_URL}${path}`
+  const headers = new Headers(init.headers)
+
+  if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
   return fetch(url, {
     ...init,
-    // Ensure cookies from the browser are forwarded to the backend
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers ? Object.fromEntries(new Headers(init.headers)) : {}),
-    },
+    headers,
   })
 }
 

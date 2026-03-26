@@ -117,6 +117,10 @@ def test_complaint_submission_and_list() -> None:
                 "subject": "Coverage issue in Mogoditshane",
                 "description": "There has been no reliable data connection in Mogoditshane for five days.",
                 "incidentDate": "2026-03-20",
+                "location": "Mogoditshane",
+                "reportedToProvider": "yes",
+                "providerCaseNumber": "MSC-2026-00124",
+                "preferredContactMethod": "phone",
                 "name": "Naledi Molefe",
                 "email": "applicant@bocra.demo",
                 "phone": "+26771234567",
@@ -128,6 +132,10 @@ def test_complaint_submission_and_list() -> None:
         submitted = response.json()
         assert submitted["message"] == "Complaint submitted successfully"
         assert submitted["status"] == "Received"
+        assert submitted["complaint"]["location"] == "Mogoditshane"
+        assert submitted["complaint"]["reportedToProvider"] == "yes"
+        assert submitted["complaint"]["providerCaseNumber"] == "MSC-2026-00124"
+        assert submitted["complaint"]["preferredContactMethod"] == "phone"
 
         listing = client.get("/api/complaints")
         assert listing.status_code == 200

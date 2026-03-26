@@ -15,10 +15,12 @@ import {
   type ComplaintAttachmentMeta,
   type ComplaintDraft,
   type ComplaintField,
+  type ComplaintReviewSummary,
 } from "@/lib/complaints";
 import { MessageLoading } from "@/components/ui/message-loading";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
+import { useRouter } from "next/navigation";
 import {
   Bot,
   MessageSquare,
@@ -30,10 +32,16 @@ import {
 } from "lucide-react";
 import { ChangeEvent, FormEvent, Fragment, useEffect, useRef, useState } from "react";
 
+type ChatAction = {
+  label: string;
+  href: string;
+};
+
 type Message = {
   id: string;
   role: "user" | "bot";
   content: string;
+  actions?: ChatAction[];
 };
 
 type SubmittedComplaint = {
@@ -194,6 +202,9 @@ const COMPLAINT_SUMMARY_FIELDS: ComplaintField[] = [
   "category",
   "operator",
   "subject",
+  "description",
+  "location",
+  "reportedToProvider",
   "name",
   "email",
   "phone",
@@ -212,6 +223,12 @@ function formatComplaintValue(field: ComplaintField, draft: ComplaintDraft) {
           .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
           .join(" ")
       : "";
+  }
+
+  if (field === "reportedToProvider") {
+    if (draft.reportedToProvider === "yes") return "Yes";
+    if (draft.reportedToProvider === "no") return "No";
+    return "";
   }
 
   return draft[field];
@@ -240,7 +257,17 @@ function buildAttachmentOnlyMessage(files: File[]) {
   ].join("\n");
 }
 
+function isChatAction(value: unknown): value is ChatAction {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    typeof (value as ChatAction).label === "string" &&
+    typeof (value as ChatAction).href === "string"
+  );
+}
+
 export function FloatingChatWidget() {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -256,6 +283,8 @@ export function FloatingChatWidget() {
   const [complaintFlowActive, setComplaintFlowActive] = useState(false);
   const [complaintMissingFields, setComplaintMissingFields] = useState<ComplaintField[]>([]);
   const [complaintReadyToSubmit, setComplaintReadyToSubmit] = useState(false);
+  const [awaitingComplaintConfirmation, setAwaitingComplaintConfirmation] = useState(false);
+  const [complaintReviewSummary, setComplaintReviewSummary] = useState<ComplaintReviewSummary | null>(null);
   const [submittedComplaint, setSubmittedComplaint] = useState<SubmittedComplaint | null>(null);
   const [chatAttachments, setChatAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
@@ -266,7 +295,7 @@ export function FloatingChatWidget() {
   const effectiveComplaintMissingFields = effectiveComplaintFlowActive
     ? complaintMissingFields.length > 0
       ? complaintMissingFields
-      : listMissingComplaintFields(complaintDraft)
+      : listMissingComplaintFields(complaintDraft, { requireEnhancedIntake: true })
     : [];
   const readyForComplaintSubmit =
     (complaintReadyToSubmit || effectiveComplaintMissingFields.length === 0) &&
@@ -338,7 +367,9 @@ export function FloatingChatWidget() {
     setChatAttachments(nextFiles);
     setAttachmentError(errors.join(" "));
     setComplaintFlowActive(true);
-    setComplaintMissingFields(listMissingComplaintFields(complaintDraft));
+    setComplaintMissingFields(
+      listMissingComplaintFields(complaintDraft, { requireEnhancedIntake: true }),
+    );
     setSubmittedComplaint(null);
     event.target.value = "";
   }
@@ -354,6 +385,8 @@ export function FloatingChatWidget() {
       setComplaintFlowActive(false);
       setComplaintMissingFields([]);
       setComplaintReadyToSubmit(false);
+      setAwaitingComplaintConfirmation(false);
+      setComplaintReviewSummary(null);
     }
     setAttachmentError("");
   }
@@ -366,6 +399,10 @@ export function FloatingChatWidget() {
     formData.append("subject", draft.subject);
     formData.append("description", draft.description);
     formData.append("incidentDate", draft.incidentDate);
+    formData.append("location", draft.location);
+    formData.append("reportedToProvider", draft.reportedToProvider);
+    formData.append("providerCaseNumber", draft.providerCaseNumber);
+    formData.append("preferredContactMethod", draft.preferredContactMethod);
     formData.append("name", draft.name);
     formData.append("email", draft.email);
     formData.append("phone", draft.phone);
@@ -409,6 +446,8 @@ export function FloatingChatWidget() {
     setComplaintFlowActive(false);
     setComplaintMissingFields([]);
     setComplaintReadyToSubmit(false);
+    setAwaitingComplaintConfirmation(false);
+    setComplaintReviewSummary(null);
     setChatAttachments([]);
     setAttachmentError("");
     setMessages((prev) => [
@@ -487,6 +526,15 @@ export function FloatingChatWidget() {
       const nextMissingFields = Array.isArray(data?.missingFields)
         ? data.missingFields.filter(isComplaintField)
         : [];
+      const nextActions = Array.isArray(data?.navigationActions)
+        ? data.navigationActions.filter(isChatAction)
+        : [];
+      const nextReviewSummary =
+        data?.reviewSummary &&
+        typeof data.reviewSummary === "object" &&
+        Array.isArray(data.reviewSummary.items)
+          ? (data.reviewSummary as ComplaintReviewSummary)
+          : null;
 
       setMessages((prev) => [
         ...prev,
@@ -494,12 +542,15 @@ export function FloatingChatWidget() {
           id: `${Date.now()}-bot`,
           role: "bot",
           content: reply,
+          actions: nextActions,
         },
       ]);
       setComplaintDraft(nextComplaintDraft);
       setComplaintFlowActive(nextComplaintFlowActive);
       setComplaintMissingFields(nextMissingFields);
       setComplaintReadyToSubmit(Boolean(data?.readyToSubmit));
+      setAwaitingComplaintConfirmation(Boolean(data?.awaitingConfirmation));
+      setComplaintReviewSummary(nextReviewSummary);
 
       if (data?.shouldSubmitComplaint) {
         await submitComplaintFromChat(nextComplaintDraft);
@@ -621,6 +672,24 @@ export function FloatingChatWidget() {
                       </div>
                     </div>
 
+                    {message.actions && message.actions.length > 0 && (
+                      <div className="ml-12 flex flex-wrap gap-2">
+                        {message.actions.map((action) => (
+                          <button
+                            key={`${message.id}-${action.href}`}
+                            type="button"
+                            onClick={() => {
+                              router.push(action.href);
+                              setIsOpen(false);
+                            }}
+                            className="rounded-full border border-[#75AADB]/30 bg-[#edf4ff] px-3 py-1.5 text-xs font-medium text-[#003580] transition-colors hover:bg-[#dceaff]"
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     {isWelcome && showQuickPrompts && (
                       <div className="ml-12 flex flex-wrap gap-2">
                         {QUICK_PROMPTS.map((prompt) => (
@@ -701,11 +770,19 @@ export function FloatingChatWidget() {
                         {readyForComplaintSubmit && (
                           <button
                             type="button"
-                            onClick={() => void sendMessage("Please submit my complaint now.")}
+                            onClick={() =>
+                              void sendMessage(
+                                awaitingComplaintConfirmation
+                                  ? "Yes, confirm and submit this complaint now."
+                                  : "Please submit my complaint now.",
+                              )
+                            }
                             disabled={isLoading}
                             className="shrink-0 rounded-full bg-[#06193e] px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#027ac6] disabled:cursor-not-allowed disabled:bg-slate-300"
                           >
-                            Submit Complaint
+                            {awaitingComplaintConfirmation
+                              ? "Confirm & Submit"
+                              : "Review for Submit"}
                           </button>
                         )}
                       </div>
@@ -743,6 +820,36 @@ export function FloatingChatWidget() {
                         <p className="mt-3 text-xs text-slate-500">
                           Start by describing the problem, the operator involved, or your contact details.
                         </p>
+                      )}
+
+                      {complaintReviewSummary && complaintReviewSummary.items.length > 0 && (
+                        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            Final Review
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            {complaintReviewSummary.items.map((item) => (
+                              <div
+                                key={item.label}
+                                className="grid grid-cols-[7rem_1fr] gap-2 text-[11px]"
+                              >
+                                <span className="font-medium text-slate-400">{item.label}</span>
+                                <span className="text-slate-700">{item.value}</span>
+                              </div>
+                            ))}
+                            <div className="grid grid-cols-[7rem_1fr] gap-2 text-[11px]">
+                              <span className="font-medium text-slate-400">Attachments</span>
+                              <span className="text-slate-700">
+                                {complaintReviewSummary.attachmentCount}
+                              </span>
+                            </div>
+                          </div>
+                          <p className="mt-3 text-[11px] text-slate-500">
+                            {awaitingComplaintConfirmation
+                              ? "Please confirm if everything above is correct before BOCRA receives it."
+                              : "Once you are happy with this summary, ask me to submit and I will request confirmation."}
+                          </p>
+                        </div>
                       )}
 
                       {!readyForComplaintSubmit && effectiveComplaintMissingFields.length > 0 && (

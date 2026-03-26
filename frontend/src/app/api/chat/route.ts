@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  createComplaintReviewSummary,
   EMPTY_COMPLAINT_DRAFT,
   type ComplaintAttachmentMeta,
   type ComplaintDraft,
+  type ComplaintField,
   type ConsentUpdate,
   hasComplaintDraftContent,
   listMissingComplaintFields,
   mergeComplaintDraft,
   normalizeComplaintDraft,
 } from "@/lib/complaints";
+import {
+  buildKnowledgeContext,
+  buildStructuredPublicChatReply,
+  findPublicChatKnowledge,
+} from "@/lib/public-chat-knowledge";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -21,6 +28,7 @@ You help website visitors with:
 - consumer complaints and complaint tracking
 - tariffs, telecom services, and BOCRA public information
 - BOCRA contact channels, services, and mandate
+- public website navigation
 
 Return valid JSON only using this exact shape:
 {
@@ -32,6 +40,10 @@ Return valid JSON only using this exact shape:
     "subject": "string",
     "description": "string",
     "incidentDate": "YYYY-MM-DD or ''",
+    "location": "string",
+    "reportedToProvider": "yes | no | ''",
+    "providerCaseNumber": "string",
+    "preferredContactMethod": "email | phone | either | ''",
     "name": "string",
     "email": "string",
     "phone": "string"
@@ -52,7 +64,7 @@ Instructions:
 - Set wantsToSubmitComplaint to true only if the user clearly says to submit, proceed, file it now, or continue with submission.
 - Keep replies concise, helpful, and suitable for the general public in Botswana.
 - When details are missing during complaint intake, ask for only the single most useful next item.
-- For general BOCRA questions, answer normally and keep complaintUpdates empty.
+- For general BOCRA questions, use the provided structured website knowledge when it is relevant.
 - Do not wrap the JSON in markdown fences.
 `.trim();
 
@@ -79,7 +91,12 @@ type ModelReply = {
 function extractText(payload: unknown) {
   if (!payload || typeof payload !== "object") return "";
 
-  const candidates = (payload as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates;
+  const candidates = (
+    payload as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    }
+  ).candidates;
+
   if (!Array.isArray(candidates) || candidates.length === 0) return "";
 
   const parts = candidates[0]?.content?.parts;
@@ -127,7 +144,7 @@ function buildHistoryText(history: ChatHistoryMessage[]) {
     .join("\n");
 }
 
-function getNextFieldPrompt(field: string) {
+function getNextFieldPrompt(field: ComplaintField) {
   switch (field) {
     case "category":
       return "Please tell me what type of complaint this is, for example billing, coverage, service quality, broadcasting, or postal.";
@@ -137,6 +154,10 @@ function getNextFieldPrompt(field: string) {
       return "Please give me a short title for the issue.";
     case "description":
       return "Please describe what happened in a little more detail so I can capture the complaint properly.";
+    case "location":
+      return "Where did this issue happen?";
+    case "reportedToProvider":
+      return "Did you report this issue to your provider first?";
     case "name":
       return "Please share your full name.";
     case "email":
@@ -153,7 +174,7 @@ function getNextFieldPrompt(field: string) {
 function buildFallbackReply(
   complaintFlowActive: boolean,
   draft: ComplaintDraft,
-  missingFields: string[],
+  missingFields: ComplaintField[],
   readyToSubmit: boolean,
 ) {
   if (!complaintFlowActive) {
@@ -161,14 +182,33 @@ function buildFallbackReply(
   }
 
   if (readyToSubmit) {
-    return "I have enough information to file your complaint. Tell me to submit it now, or tap Submit Complaint below.";
+    return "I have enough information to prepare your complaint. Please review the summary and confirm before I submit it.";
   }
 
   if (hasComplaintDraftContent(draft) && missingFields.length > 0) {
     return getNextFieldPrompt(missingFields[0]);
   }
 
-  return "Please tell me what happened, who the operator is, and how BOCRA can contact you.";
+  return "Please tell me what happened, who the operator is, where the issue happened, and how BOCRA can contact you.";
+}
+
+function isExplicitComplaintConfirmation(message: string) {
+  const lowered = message.toLowerCase();
+  return (
+    (lowered.includes("confirm") || lowered.includes("yes")) &&
+    (lowered.includes("submit") || lowered.includes("file") || lowered.includes("proceed"))
+  );
+}
+
+function buildBaseResponse(
+  draft: ComplaintDraft,
+  attachments: ComplaintAttachmentMeta[],
+) {
+  return {
+    complaintDraft: draft,
+    attachmentCount: attachments.length,
+    submittedComplaint: null,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -178,13 +218,6 @@ export async function POST(request: NextRequest) {
 
     if (!message) {
       return NextResponse.json({ error: "Please enter a message first." }, { status: 400 });
-    }
-
-    if (!GEMINI_API_KEY) {
-      return NextResponse.json(
-        { error: "Gemini is not configured yet. Add GEMINI_API_KEY to frontend/.env.local." },
-        { status: 500 },
-      );
     }
 
     const complaintDraft = normalizeComplaintDraft(body.complaintDraft ?? EMPTY_COMPLAINT_DRAFT);
@@ -207,11 +240,39 @@ export async function POST(request: NextRequest) {
         )
       : [];
 
+    const structuredHelp = !hasComplaintDraftContent(complaintDraft)
+      ? buildStructuredPublicChatReply(message)
+      : null;
+
+    if (structuredHelp) {
+      return NextResponse.json({
+        reply: structuredHelp.reply,
+        complaintFlowActive: false,
+        missingFields: [],
+        readyToSubmit: false,
+        shouldSubmitComplaint: false,
+        awaitingConfirmation: false,
+        reviewSummary: null,
+        navigationActions: structuredHelp.actions,
+        ...buildBaseResponse(complaintDraft, attachments),
+      });
+    }
+
+    if (!GEMINI_API_KEY) {
+      return NextResponse.json(
+        { error: "Gemini is not configured yet. Add GEMINI_API_KEY to frontend/.env.local." },
+        { status: 500 },
+      );
+    }
+
     const prompt = [
       SYSTEM_PROMPT,
       "",
       "Current complaint draft:",
       JSON.stringify(complaintDraft),
+      "",
+      "Structured BOCRA website knowledge relevant to this question:",
+      buildKnowledgeContext(message),
       "",
       "Supporting files already attached:",
       attachments.length > 0 ? JSON.stringify(attachments) : "None.",
@@ -231,14 +292,10 @@ export async function POST(request: NextRequest) {
           "x-goog-api-key": GEMINI_API_KEY,
         },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: prompt }],
-            },
-          ],
+          contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.3,
-            maxOutputTokens: 768,
+            maxOutputTokens: 900,
           },
         }),
         cache: "no-store",
@@ -257,7 +314,6 @@ export async function POST(request: NextRequest) {
     }
 
     const rawText = extractText(payload);
-
     if (!rawText) {
       return NextResponse.json(
         { error: "Gemini did not return a text response. Please try again." },
@@ -266,21 +322,28 @@ export async function POST(request: NextRequest) {
     }
 
     const parsed = parseModelReply(rawText);
+    const knowledgeMatches = findPublicChatKnowledge(message);
+    const navigationActions = knowledgeMatches[0]?.actions ?? [];
+
     if (!parsed) {
       const complaintFlowActive = hasComplaintDraftContent(complaintDraft);
       const missingFields = complaintFlowActive
-        ? listMissingComplaintFields(complaintDraft)
+        ? listMissingComplaintFields(complaintDraft, { requireEnhancedIntake: true })
         : [];
+      const readyToSubmit = complaintFlowActive && missingFields.length === 0;
 
       return NextResponse.json({
         reply: rawText,
         complaintFlowActive,
-        complaintDraft,
-        attachmentCount: attachments.length,
         missingFields,
-        readyToSubmit: complaintFlowActive && missingFields.length === 0,
+        readyToSubmit,
         shouldSubmitComplaint: false,
-        submittedComplaint: null,
+        awaitingConfirmation: false,
+        reviewSummary: readyToSubmit
+          ? createComplaintReviewSummary(complaintDraft, attachments.length)
+          : null,
+        navigationActions,
+        ...buildBaseResponse(complaintDraft, attachments),
       });
     }
 
@@ -300,12 +363,17 @@ export async function POST(request: NextRequest) {
     const complaintFlowActive =
       parsed.intent === "complaint_intake" || hasComplaintDraftContent(mergedComplaintDraft);
     const missingFields = complaintFlowActive
-      ? listMissingComplaintFields(mergedComplaintDraft)
+      ? listMissingComplaintFields(mergedComplaintDraft, { requireEnhancedIntake: true })
       : [];
     const readyToSubmit = complaintFlowActive && missingFields.length === 0;
     const wantsToSubmitComplaint = parsed.wantsToSubmitComplaint === true;
+    const explicitConfirmation = isExplicitComplaintConfirmation(message);
+    const awaitingConfirmation =
+      complaintFlowActive && readyToSubmit && wantsToSubmitComplaint && !explicitConfirmation;
+    const shouldSubmitComplaint =
+      complaintFlowActive && readyToSubmit && wantsToSubmitComplaint && explicitConfirmation;
 
-    const reply =
+    let reply =
       typeof parsed.reply === "string" && parsed.reply.trim()
         ? parsed.reply.trim()
         : buildFallbackReply(
@@ -315,15 +383,23 @@ export async function POST(request: NextRequest) {
             readyToSubmit,
           );
 
+    if (awaitingConfirmation) {
+      reply =
+        "I have prepared your complaint summary. Please review it and confirm before I submit it to BOCRA.";
+    }
+
     return NextResponse.json({
       reply,
       complaintFlowActive,
-      complaintDraft: mergedComplaintDraft,
-      attachmentCount: attachments.length,
       missingFields,
       readyToSubmit,
-      shouldSubmitComplaint: complaintFlowActive && wantsToSubmitComplaint && readyToSubmit,
-      submittedComplaint: null,
+      shouldSubmitComplaint,
+      awaitingConfirmation,
+      reviewSummary: readyToSubmit
+        ? createComplaintReviewSummary(mergedComplaintDraft, attachments.length)
+        : null,
+      navigationActions,
+      ...buildBaseResponse(mergedComplaintDraft, attachments),
     });
   } catch {
     return NextResponse.json(

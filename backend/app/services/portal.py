@@ -187,13 +187,22 @@ class ComplaintService:
             subject=draft["subject"],
             complaint_type_code=draft["category"],
             service_provider_name=draft["operator"],
-            location_text=draft.get("incidentDate") or draft.get("location") or "",
-            provider_contacted_first=True,
+            location_text=draft.get("location") or "",
+            provider_contacted_first=str(draft.get("reportedToProvider", "")).lower() in {"yes", "true", "1"},
             narrative=draft["description"],
             current_status_code="NEW",
             expected_resolution_at=_utcnow() + timedelta(days=7),
             sla_due_at=_utcnow() + timedelta(days=7),
-            metadata_json={"contact": {"name": draft["name"], "email": draft["email"], "phone": draft["phone"]}},
+            metadata_json={
+                "contact": {
+                    "name": draft["name"],
+                    "email": draft["email"],
+                    "phone": draft["phone"],
+                    "preferredContactMethod": draft.get("preferredContactMethod", ""),
+                },
+                "incidentDate": draft.get("incidentDate", ""),
+                "providerCaseNumber": draft.get("providerCaseNumber", ""),
+            },
         )
         self.repo.create_complaint(complaint)
 

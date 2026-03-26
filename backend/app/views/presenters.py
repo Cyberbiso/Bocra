@@ -140,6 +140,10 @@ def present_complaint_submission(
             "subject": draft.get("subject", ""),
             "description": draft.get("description", ""),
             "incidentDate": draft.get("incidentDate", ""),
+            "location": draft.get("location", ""),
+            "reportedToProvider": draft.get("reportedToProvider", ""),
+            "providerCaseNumber": draft.get("providerCaseNumber", ""),
+            "preferredContactMethod": draft.get("preferredContactMethod", ""),
             "name": draft.get("name", ""),
             "email": draft.get("email", ""),
             "phone": draft.get("phone", ""),
@@ -166,6 +170,9 @@ def present_complaint_detail(detail: dict[str, Any], officer: User | None = None
         "expectedResolution": _to_date(complaint.expected_resolution_at),
         "location": complaint.location_text or "",
         "reportedToProvider": complaint.provider_contacted_first,
+        "incidentDate": (complaint.metadata_json or {}).get("incidentDate", ""),
+        "providerCaseNumber": (complaint.metadata_json or {}).get("providerCaseNumber", ""),
+        "preferredContactMethod": ((complaint.metadata_json or {}).get("contact") or {}).get("preferredContactMethod", ""),
         "timeline": [
             {
                 "id": event.id,

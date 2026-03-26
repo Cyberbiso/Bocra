@@ -1,5 +1,4 @@
 import DomainRegistration from "@/components/DomainRegistration";
-import Chatbot from "@/components/Chatbot";
 
 export const metadata = {
   title: "Register .bw Domain | Services | BOCRA",
@@ -8,10 +7,5 @@ export const metadata = {
 };
 
 export default function DomainRegistrationPage() {
-  return (
-    <>
-      <DomainRegistration />
-      <Chatbot />
-    </>
-  );
+  return <DomainRegistration />;
 }

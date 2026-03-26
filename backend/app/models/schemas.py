@@ -33,6 +33,14 @@ class LicenseApplicationCreate(BaseModel):
     formData: dict[str, Any] = Field(default_factory=dict)
 
 
+class TypeApprovalPartyCreate(BaseModel):
+    partyType: Literal["applicant", "customer", "manufacturer", "repair_provider"]
+    displayName: str = Field(min_length=1)
+    organizationId: str | None = None
+    contactUserId: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class TypeApprovalApplicationCreate(BaseModel):
     accreditationType: Literal["customer", "manufacturer", "repair_provider"]
     brandName: str
@@ -42,6 +50,17 @@ class TypeApprovalApplicationCreate(BaseModel):
     sampleImei: str | None = ""
     countryOfManufacture: str
     declaration: bool = False
+    parties: list[TypeApprovalPartyCreate] = Field(default_factory=list)
+
+
+class TypeApprovalCommentCreate(BaseModel):
+    body: str = Field(min_length=1)
+    visibility: Literal["APPLICANT", "INTERNAL", "PUBLIC"] = "APPLICANT"
+
+
+class TypeApprovalDocumentReviewCreate(BaseModel):
+    reviewStatus: Literal["PENDING", "APPROVED", "REJECTED", "NEEDS_UPDATE"]
+    note: str | None = ""
 
 
 class ExternalSystemCreate(BaseModel):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from datetime import date, datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
@@ -12,24 +14,34 @@ from sqlalchemy.orm import Session
 from app.integrations.qos import DqosClient
 from app.integrations.supabase import StorageAdapter
 from app.models.entities import (
+    AuditLog,
     Certificate,
     Complaint,
     ComplaintAttachment,
     ComplaintMessage,
     DeviceCatalog,
+    DocumentFile,
     Invoice,
+    InvoiceItem,
     LicenseApplication,
     LicenseRecord,
     Notification,
     Payment,
     Receipt,
+    TypeApprovalRecord,
     TypeApprovalApplication,
     User,
     WorkflowApplication,
+    WorkflowApplicationComment,
+    WorkflowApplicationDocument,
+    WorkflowApplicationParty,
+    WorkflowApplicationStatusHistory,
+    WorkflowApplicationTask,
     WorkflowEvent,
 )
 from app.repositories.bocra import (
     AgentRepository,
+    AuditRepository,
     AuthRepository,
     BillingRepository,
     CertificateRepository,
@@ -70,7 +82,8 @@ class DashboardService:
         self.certificate_repo = CertificateRepository(db)
 
     def summary(self, *, role: str, user: User | None) -> dict[str, Any]:
-        user_id = user.id if user and role not in {"officer", "admin"} else None
+        staff_roles = {"officer", "type_approver", "admin"}
+        user_id = user.id if user and role not in staff_roles else None
         applications = self.licensing_repo.list_license_applications(user_id=user_id)
         complaints, _ = self.complaint_repo.list_complaints(
             role=role,
@@ -82,8 +95,8 @@ class DashboardService:
             page=1,
             page_size=100,
         )
-        invoices = self.billing_repo.list_invoices(user.id if user and role not in {"officer", "admin"} else None)
-        certificates = self.certificate_repo.list_certificates(user.id if user and role not in {"officer", "admin"} else None)
+        invoices = self.billing_repo.list_invoices(user.id if user and role not in staff_roles else None)
+        certificates = self.certificate_repo.list_certificates(user.id if user and role not in staff_roles else None)
 
         open_invoices = [invoice for invoice in invoices if invoice.status_code in {"UNPAID", "OVERDUE"}]
         result: dict[str, Any] = {
@@ -93,7 +106,7 @@ class DashboardService:
             "invoiceTotal": f"P {sum(float(invoice.total_amount) for invoice in open_invoices):,.2f}",
             "certificates": len(certificates),
         }
-        if role in {"officer", "admin"}:
+        if role in staff_roles:
             result["reviewQueue"] = sum(
                 1 for application in applications if application.workflow_application_id
             ) + sum(1 for complaint in complaints if complaint.current_status_code in {"NEW", "ASSIGNED", "PENDING"})
@@ -122,12 +135,19 @@ class DashboardService:
 
 
 class ComplaintService:
+    STAFF_ROLES = {"officer", "admin"}
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.repo = ComplaintRepository(db)
         self.workflow_repo = WorkflowRepository(db)
         self.notifications = NotificationRepository(db)
         self.storage = StorageAdapter()
+
+    def _can_access_complaint(self, complaint: Complaint, *, user: User | None, role: str) -> bool:
+        if role in self.STAFF_ROLES:
+            return True
+        return bool(user and complaint.complainant_user_id == user.id)
 
     def list_complaints(
         self,
@@ -219,9 +239,11 @@ class ComplaintService:
         self.db.refresh(complaint)
         return complaint
 
-    def get_detail(self, complaint_id: str) -> dict[str, Any] | None:
+    def get_detail(self, complaint_id: str, *, user: User | None = None, role: str = "public") -> dict[str, Any] | None:
         complaint = self.repo.get_complaint_by_reference(complaint_id)
         if not complaint:
+            return None
+        if not self._can_access_complaint(complaint, user=user, role=role):
             return None
         return {
             "complaint": complaint,
@@ -230,9 +252,11 @@ class ComplaintService:
             "events": self.workflow_repo.list_events_for_resource("complaint", complaint.id),
         }
 
-    def add_message(self, complaint_id: str, *, body: str, user: User | None) -> ComplaintMessage | None:
+    def add_message(self, complaint_id: str, *, body: str, user: User | None, role: str) -> ComplaintMessage | None:
         complaint = self.repo.get_complaint_by_reference(complaint_id)
         if not complaint:
+            return None
+        if not self._can_access_complaint(complaint, user=user, role=role):
             return None
         author_name = f"{user.first_name} {user.last_name}" if user else "Portal User"
         if user:
@@ -263,9 +287,18 @@ class ComplaintService:
         self.db.refresh(message)
         return message
 
-    def get_attachment_bytes(self, complaint_id: str, attachment_id: str) -> tuple[ComplaintAttachment, bytes] | None:
+    def get_attachment_bytes(
+        self,
+        complaint_id: str,
+        attachment_id: str,
+        *,
+        user: User | None,
+        role: str,
+    ) -> tuple[ComplaintAttachment, bytes] | None:
         complaint = self.repo.get_complaint_by_reference(complaint_id)
         if not complaint:
+            return None
+        if not self._can_access_complaint(complaint, user=user, role=role):
             return None
         attachments = self.repo.list_attachments(complaint.id)
         attachment = next((item for item in attachments if item.id == attachment_id), None)
@@ -335,6 +368,8 @@ class ComplaintService:
 
 
 class LicensingService:
+    STAFF_ROLES = {"officer", "admin"}
+
     LICENCE_TYPES = [
         {"id": 1, "name": "Individual Service Provider (ISP)"},
         {"id": 2, "name": "Network Service Provider (NSP)"},
@@ -351,10 +386,100 @@ class LicensingService:
         self.notifications = NotificationRepository(db)
 
     def dashboard_data(self, *, user: User | None, role: str) -> dict[str, Any]:
-        user_id = user.id if user and role not in {"officer", "admin"} else None
+        user_id = user.id if user and role not in {"officer", "type_approver", "admin"} else None
         return {
             "licences": self.repo.list_licence_records(user_id=user_id),
             "applications": self.repo.list_license_applications(user_id=user_id),
+        }
+
+    def _can_access_workflow(self, workflow: WorkflowApplication, *, user: User | None, role: str) -> bool:
+        if role in self.STAFF_ROLES:
+            return True
+        return bool(user and workflow.applicant_user_id == user.id)
+
+    def _serialize_application_summary(self, application: LicenseApplication, workflow: WorkflowApplication) -> dict[str, Any]:
+        return {
+            "id": workflow.id,
+            "licenseApplicationId": application.id,
+            "applicationNumber": workflow.application_number,
+            "status": workflow.current_status_code,
+            "stage": workflow.current_stage_code,
+            "title": workflow.title,
+            "licenceType": application.licence_type_name,
+            "applicantName": application.applicant_name,
+            "applicantEmail": application.applicant_email,
+            "submittedDate": _fmt_datetime(workflow.submitted_at),
+            "dueDate": _fmt_datetime(workflow.expected_decision_at),
+        }
+
+    def list_applications(
+        self,
+        *,
+        user: User | None,
+        role: str,
+        status: str | None,
+        query: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        rows, total = self.repo.list_license_applications_with_workflow(
+            role=role,
+            user_id=user.id if user else None,
+            status=status,
+            query=query,
+            page=page,
+            page_size=page_size,
+        )
+        total_pages = max(1, ceil(total / page_size)) if page_size else 1
+        return {
+            "data": [self._serialize_application_summary(application, workflow) for application, workflow in rows],
+            "meta": {
+                "total": total,
+                "page": page,
+                "pageSize": page_size,
+                "totalPages": total_pages,
+            },
+        }
+
+    def application_detail(self, reference: str, *, user: User | None, role: str) -> dict[str, Any] | None:
+        result = self.repo.get_license_application_by_reference(reference)
+        if not result:
+            return None
+        application, workflow = result
+        if not self._can_access_workflow(workflow, user=user, role=role):
+            return None
+        return {
+            "summary": self._serialize_application_summary(application, workflow),
+            "application": {
+                "id": application.id,
+                "workflowId": workflow.id,
+                "applicationNumber": workflow.application_number,
+                "category": application.category_code,
+                "licenceType": application.licence_type_name,
+                "applicantName": application.applicant_name,
+                "applicantEmail": application.applicant_email,
+                "coverageArea": application.coverage_area,
+                "formData": application.form_data_json,
+            },
+            "workflow": {
+                "id": workflow.id,
+                "status": workflow.current_status_code,
+                "stage": workflow.current_stage_code,
+                "submittedAt": _fmt_datetime(workflow.submitted_at),
+                "expectedDecisionAt": _fmt_datetime(workflow.expected_decision_at),
+            },
+            "events": [
+                {
+                    "id": event.id,
+                    "type": event.event_type_code,
+                    "label": event.label,
+                    "actor": event.actor_name,
+                    "actorRole": event.actor_role,
+                    "comment": event.comment or "",
+                    "occurredAt": _fmt_datetime(event.occurred_at),
+                }
+                for event in self.workflow_repo.list_events_for_resource("licence_application", workflow.id)
+            ],
         }
 
     def detail(self, record_id: str) -> dict[str, Any] | None:
@@ -556,11 +681,310 @@ class LicensingService:
 
 
 class TypeApprovalService:
+    REVIEWER_ROLES = {"type_approver", "admin"}
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.device_repo = DeviceRepository(db)
         self.workflow_repo = WorkflowRepository(db)
         self.notifications = NotificationRepository(db)
+        self.billing_repo = BillingRepository(db)
+        self.certificate_repo = CertificateRepository(db)
+        self.audit_repo = AuditRepository(db)
+        self.auth_repo = AuthRepository(db)
+        self.storage = StorageAdapter()
+
+    def _is_reviewer(self, role: str) -> bool:
+        return role in self.REVIEWER_ROLES
+
+    def _role_for_user(self, user: User | None) -> str:
+        if not user:
+            return "public"
+        roles = self.auth_repo.get_roles_for_user(user.id)
+        return AuthService.primary_role(roles)
+
+    def _actor_role(self, user: User | None) -> str:
+        role = self._role_for_user(user)
+        return "type_approver" if role == "type_approver" else role
+
+    def _resolve_application(
+        self,
+        reference: str,
+    ) -> tuple[TypeApprovalApplication, WorkflowApplication, DeviceCatalog] | None:
+        return self.device_repo.get_type_approval_application(reference)
+
+    def _ensure_access(self, workflow: WorkflowApplication, *, user: User | None, role: str) -> bool:
+        if self._is_reviewer(role):
+            return True
+        return bool(user and workflow.applicant_user_id == user.id)
+
+    def _safe_file_name(self, file_name: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", file_name).strip("._")
+        return safe or "upload.bin"
+
+    def _applicant_display_name(self, workflow: WorkflowApplication) -> str:
+        applicant = self.auth_repo.get_user_by_id(workflow.applicant_user_id)
+        if applicant:
+            full_name = f"{applicant.first_name} {applicant.last_name}".strip()
+            if full_name:
+                return full_name
+        return workflow.title
+
+    def _serialize_application_summary(
+        self,
+        application: TypeApprovalApplication,
+        workflow: WorkflowApplication,
+        device: DeviceCatalog,
+    ) -> dict[str, Any]:
+        open_tasks = self.workflow_repo.list_tasks(workflow.id, open_only=True)
+        invoices = self.billing_repo.list_invoices_for_application(workflow.id)
+        certificates = self.certificate_repo.list_for_application(workflow.id)
+        return {
+            "id": workflow.id,
+            "typeApprovalApplicationId": application.id,
+            "applicationNumber": workflow.application_number,
+            "status": workflow.current_status_code,
+            "stage": workflow.current_stage_code,
+            "title": workflow.title,
+            "brand": device.brand_name,
+            "model": device.model_name,
+            "deviceType": device.device_type,
+            "simEnabled": device.is_sim_enabled,
+            "sampleImei": application.sample_imei,
+            "countryOfManufacture": application.country_of_manufacture,
+            "submittedDate": _fmt_datetime(workflow.submitted_at),
+            "dueDate": _fmt_datetime(workflow.expected_decision_at),
+            "openTaskCount": len(open_tasks),
+            "invoiceCount": len(invoices),
+            "certificateCount": len(certificates),
+        }
+
+    def _serialize_party(self, party: WorkflowApplicationParty) -> dict[str, Any]:
+        organization = self.auth_repo.get_organization_by_id(party.organization_id)
+        contact = self.auth_repo.get_user_by_id(party.contact_user_id)
+        contact_name = ""
+        if contact:
+            contact_name = f"{contact.first_name} {contact.last_name}".strip()
+        return {
+            "id": party.id,
+            "partyType": party.party_type_code,
+            "displayName": party.display_name or "",
+            "organizationId": party.organization_id,
+            "organizationName": organization.legal_name if organization else "",
+            "contactUserId": party.contact_user_id,
+            "contactName": contact_name,
+            "metadata": party.metadata_json,
+            "createdAt": _fmt_datetime(party.created_at),
+        }
+
+    def _serialize_comment(self, comment: WorkflowApplicationComment) -> dict[str, Any]:
+        author = self.auth_repo.get_user_by_id(comment.author_user_id)
+        author_name = "System"
+        if author:
+            author_name = f"{author.first_name} {author.last_name}".strip() or author.email
+        return {
+            "id": comment.id,
+            "authorUserId": comment.author_user_id,
+            "authorName": author_name,
+            "visibility": comment.visibility_code,
+            "body": comment.body,
+            "createdAt": _fmt_datetime(comment.created_at),
+        }
+
+    def _serialize_document(
+        self,
+        workflow: WorkflowApplication,
+        document: WorkflowApplicationDocument,
+        file: DocumentFile,
+    ) -> dict[str, Any]:
+        return {
+            "id": document.id,
+            "fileId": file.id,
+            "name": file.file_name,
+            "mimeType": file.mime_type,
+            "sizeBytes": file.file_size_bytes,
+            "documentType": document.document_type_code,
+            "isRequired": document.is_required,
+            "reviewStatus": document.review_status_code,
+            "storageKey": file.storage_key,
+            "publicUrl": self.storage.public_url(file.storage_key),
+            "downloadPath": f"/api/type-approval/applications/{workflow.application_number}/documents/{document.id}/download",
+            "uploadedByUserId": document.uploaded_by_user_id,
+            "uploadedAt": _fmt_datetime(document.created_at),
+        }
+
+    def list_applications(
+        self,
+        *,
+        user: User | None,
+        role: str,
+        status: str | None,
+        query: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        rows, total = self.device_repo.list_type_approval_applications(
+            role=role,
+            user_id=user.id if user else None,
+            status=status,
+            query=query,
+            page=page,
+            page_size=page_size,
+        )
+        total_pages = max(1, ceil(total / page_size)) if page_size else 1
+        return {
+            "data": [self._serialize_application_summary(application, workflow, device) for application, workflow, device in rows],
+            "meta": {
+                "total": total,
+                "page": page,
+                "pageSize": page_size,
+                "totalPages": total_pages,
+            },
+        }
+
+    def queue(
+        self,
+        *,
+        user: User | None,
+        role: str,
+        query: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        payload = self.list_applications(user=user, role=role, status=None, query=query, page=page, page_size=page_size)
+        queue_statuses = {"PENDING", "VALIDATED", "APPROVED", "REMANDED", "AWAITING_PAYMENT"}
+        items = [item for item in payload["data"] if item["status"] in queue_statuses]
+        payload["data"] = items
+        payload["meta"]["total"] = len(items)
+        payload["meta"]["totalPages"] = 1 if items else 1
+        return payload
+
+    def detail(self, reference: str, *, user: User | None, role: str) -> dict[str, Any] | None:
+        result = self._resolve_application(reference)
+        if not result:
+            return None
+        application, workflow, device = result
+        if not self._ensure_access(workflow, user=user, role=role):
+            return None
+
+        accreditation = self.device_repo.get_accreditation_by_id(application.accreditation_id)
+        record = self.device_repo.get_type_approval_record_by_application(application.id)
+        invoices = self.billing_repo.list_invoices_for_application(workflow.id)
+        certificates = self.certificate_repo.list_for_application(workflow.id)
+        history = self.workflow_repo.list_status_history(workflow.id)
+        tasks = self.workflow_repo.list_tasks(workflow.id)
+        documents = self.workflow_repo.list_documents(workflow.id)
+        parties = self.workflow_repo.list_parties(workflow.id)
+        comments = self.workflow_repo.list_comments(workflow.id, include_internal=self._is_reviewer(role))
+        events = self.workflow_repo.list_events_for_resource("application", workflow.id)
+        legacy_events = self.workflow_repo.list_events_for_resource("type_approval_application", workflow.id)
+        combined_events = sorted([*events, *legacy_events], key=lambda event: event.occurred_at)
+        return {
+            "summary": self._serialize_application_summary(application, workflow, device),
+            "application": {
+                "id": application.id,
+                "workflowId": workflow.id,
+                "applicationNumber": workflow.application_number,
+                "formData": application.form_data_json,
+                "description": workflow.description or "",
+            },
+            "device": {
+                "id": device.id,
+                "brand": device.brand_name,
+                "marketingName": device.marketing_name,
+                "model": device.model_name,
+                "deviceType": device.device_type,
+                "simEnabled": device.is_sim_enabled,
+                "technicalSpec": device.technical_spec_json,
+            },
+            "accreditation": (
+                {
+                    "id": accreditation.id,
+                    "type": accreditation.accreditation_type_code,
+                    "reference": accreditation.reference_number,
+                    "status": accreditation.status_code,
+                    "validFrom": _fmt_date(accreditation.valid_from),
+                    "validTo": _fmt_date(accreditation.valid_to),
+                }
+                if accreditation
+                else None
+            ),
+            "record": (
+                {
+                    "id": record.id,
+                    "status": record.status_code,
+                    "approvalDate": _fmt_date(record.approval_date),
+                    "certificateId": record.certificate_id,
+                    "applicantName": record.applicant_name,
+                }
+                if record
+                else None
+            ),
+            "statusHistory": [
+                {
+                    "id": item.id,
+                    "fromStatus": item.from_status_code,
+                    "toStatus": item.to_status_code,
+                    "comment": item.comment or "",
+                    "changedAt": _fmt_datetime(item.changed_at),
+                    "changedByUserId": item.changed_by_user_id,
+                }
+                for item in history
+            ],
+            "tasks": [
+                {
+                    "id": task.id,
+                    "type": task.task_type_code,
+                    "title": task.title,
+                    "status": task.task_status_code,
+                    "assignedToUserId": task.assigned_to_user_id,
+                    "dueAt": _fmt_datetime(task.due_at),
+                    "completedAt": _fmt_datetime(task.completed_at),
+                    "notes": task.notes or "",
+                }
+                for task in tasks
+            ],
+            "documents": [
+                self._serialize_document(workflow, document, file)
+                for document, file in documents
+            ],
+            "parties": [self._serialize_party(party) for party in parties],
+            "comments": [self._serialize_comment(comment) for comment in comments],
+            "events": [
+                {
+                    "id": event.id,
+                    "type": event.event_type_code,
+                    "label": event.label,
+                    "actor": event.actor_name,
+                    "actorRole": event.actor_role,
+                    "comment": event.comment or "",
+                    "occurredAt": _fmt_datetime(event.occurred_at),
+                }
+                for event in combined_events
+            ],
+            "invoices": [
+                {
+                    "id": invoice.id,
+                    "number": invoice.invoice_number,
+                    "status": invoice.status_code,
+                    "description": invoice.description,
+                    "totalAmount": float(invoice.total_amount),
+                    "dueDate": _fmt_date(invoice.due_date),
+                }
+                for invoice in invoices
+            ],
+            "certificates": [
+                {
+                    "id": certificate.id,
+                    "certificateNumber": certificate.certificate_number,
+                    "status": certificate.status_code,
+                    "issueDate": _fmt_date(certificate.issue_date),
+                    "expiryDate": _fmt_date(certificate.expiry_date),
+                    "qrToken": certificate.qr_token,
+                }
+                for certificate in certificates
+            ],
+        }
 
     def search_public(self, query: str, page: int, size: int) -> dict[str, Any]:
         matches = self.device_repo.list_type_approvals()
@@ -612,14 +1036,17 @@ class TypeApprovalService:
                     model_name=payload["modelName"],
                     device_type="Smartphone" if payload["simEnabled"] == "yes" else "Router",
                     is_sim_enabled=payload["simEnabled"] == "yes",
+                    technical_spec_json={"notes": payload.get("techSpec") or ""},
                 )
             )
 
+        applicant_org_id = self.auth_repo.get_primary_organization_id(user.id if user else None)
         workflow = WorkflowApplication(
             application_number=f"APP-{_utcnow().year}-{str(uuid4().int)[-5:]}",
             application_type_code="TYPE_APPROVAL",
             service_module_code="TYPE_APPROVAL",
             applicant_user_id=user.id if user else None,
+            applicant_org_id=applicant_org_id,
             title=f"Type Approval — {payload['brandName']} {payload['modelName']}",
             description="Type approval application submitted via portal.",
             current_status_code="PENDING",
@@ -648,6 +1075,52 @@ class TypeApprovalService:
                 comment="Type approval application submitted via BOCRA portal.",
             )
         )
+        self.workflow_repo.create_status_history(
+            WorkflowApplicationStatusHistory(
+                application_id=workflow.id,
+                from_status_code=None,
+                to_status_code="PENDING",
+                changed_by_user_id=user.id if user else None,
+                comment="Application submitted via portal.",
+            )
+        )
+        self.workflow_repo.create_task(
+            WorkflowApplicationTask(
+                application_id=workflow.id,
+                task_type_code="REVIEW",
+                title="Review type approval application",
+                assigned_to_user_id=None,
+                task_status_code="OPEN",
+                due_at=workflow.expected_decision_at,
+                metadata_json={"module": "TYPE_APPROVAL"},
+            )
+        )
+
+        applicant_name = f"{user.first_name} {user.last_name}".strip() if user else "Portal User"
+        party_payloads = list(payload.get("parties") or [])
+        if not any(str(item.get("partyType", "")).lower() == "applicant" for item in party_payloads):
+            party_payloads.insert(
+                0,
+                {
+                    "partyType": "applicant",
+                    "displayName": applicant_name,
+                    "organizationId": applicant_org_id,
+                    "contactUserId": user.id if user else None,
+                    "metadata": {"source": "system"},
+                },
+            )
+        for party_payload in party_payloads:
+            self.workflow_repo.create_party(
+                WorkflowApplicationParty(
+                    application_id=workflow.id,
+                    party_type_code=str(party_payload.get("partyType", "")).upper(),
+                    organization_id=party_payload.get("organizationId"),
+                    contact_user_id=party_payload.get("contactUserId"),
+                    display_name=party_payload.get("displayName"),
+                    metadata_json=party_payload.get("metadata") or {},
+                )
+            )
+
         self.db.commit()
         return {"workflow": workflow, "application": application}
 
@@ -740,6 +1213,206 @@ class TypeApprovalService:
             } if certificate else None,
         }
 
+    def add_comment(
+        self,
+        reference: str,
+        *,
+        user: User,
+        role: str,
+        body: str,
+        visibility: str,
+    ) -> dict[str, Any] | None:
+        result = self._resolve_application(reference)
+        if not result:
+            return None
+        _, workflow, _ = result
+        if not self._ensure_access(workflow, user=user, role=role):
+            raise PermissionError("You do not have access to comment on this application.")
+        visibility_code = visibility.upper()
+        if visibility_code == "PUBLIC":
+            visibility_code = "APPLICANT"
+        if visibility_code == "INTERNAL" and not self._is_reviewer(role):
+            raise PermissionError("Only type approvers and admins can add internal comments.")
+        comment = self.workflow_repo.create_comment(
+            WorkflowApplicationComment(
+                application_id=workflow.id,
+                author_user_id=user.id,
+                visibility_code=visibility_code,
+                body=body.strip(),
+            )
+        )
+        if visibility_code != "INTERNAL":
+            self.workflow_repo.create_event(
+                WorkflowEvent(
+                    resource_kind="application",
+                    resource_id=workflow.id,
+                    event_type_code="TYPE_APPROVAL_COMMENT_ADDED",
+                    label="Comment Added",
+                    actor_name=f"{user.first_name} {user.last_name}".strip(),
+                    actor_role=self._actor_role(user),
+                    is_visible_to_applicant=True,
+                    comment=body.strip(),
+                )
+            )
+        return self._serialize_comment(comment)
+
+    def add_party(
+        self,
+        reference: str,
+        *,
+        user: User,
+        role: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        result = self._resolve_application(reference)
+        if not result:
+            return None
+        _, workflow, _ = result
+        if not self._ensure_access(workflow, user=user, role=role):
+            raise PermissionError("You do not have access to manage parties on this application.")
+        party = self.workflow_repo.create_party(
+            WorkflowApplicationParty(
+                application_id=workflow.id,
+                party_type_code=str(payload.get("partyType", "")).upper(),
+                organization_id=payload.get("organizationId"),
+                contact_user_id=payload.get("contactUserId"),
+                display_name=payload.get("displayName"),
+                metadata_json=payload.get("metadata") or {},
+            )
+        )
+        return self._serialize_party(party)
+
+    def upload_document(
+        self,
+        reference: str,
+        *,
+        user: User,
+        role: str,
+        file_name: str,
+        content_type: str,
+        content: bytes,
+        document_type: str,
+        is_required: bool,
+    ) -> dict[str, Any] | None:
+        result = self._resolve_application(reference)
+        if not result:
+            return None
+        _, workflow, _ = result
+        if not self._ensure_access(workflow, user=user, role=role):
+            raise PermissionError("You do not have access to upload documents for this application.")
+        if not content:
+            raise ValueError("Uploaded file is empty.")
+        cleaned_name = self._safe_file_name(file_name)
+        storage_key = self.storage.save_bytes(
+            folder=f"type-approval/{workflow.application_number}",
+            file_name=f"{uuid4().hex[:8]}-{cleaned_name}",
+            content=content,
+            content_type=content_type,
+        )
+        document_file = self.workflow_repo.create_file(
+            DocumentFile(
+                storage_key=storage_key,
+                file_name=cleaned_name,
+                mime_type=content_type,
+                file_size_bytes=len(content),
+                checksum_sha256=hashlib.sha256(content).hexdigest(),
+                uploaded_by_user_id=user.id,
+                source_module_code="TYPE_APPROVAL",
+                metadata_json={"applicationNumber": workflow.application_number},
+            )
+        )
+        document = self.workflow_repo.create_document(
+            WorkflowApplicationDocument(
+                application_id=workflow.id,
+                file_id=document_file.id,
+                document_type_code=document_type.upper(),
+                is_required=is_required,
+                review_status_code="PENDING",
+                uploaded_by_user_id=user.id,
+            )
+        )
+        self.workflow_repo.create_event(
+            WorkflowEvent(
+                resource_kind="application",
+                resource_id=workflow.id,
+                event_type_code="TYPE_APPROVAL_DOCUMENT_UPLOADED",
+                label="Document Uploaded",
+                actor_name=f"{user.first_name} {user.last_name}".strip(),
+                actor_role=self._actor_role(user),
+                is_visible_to_applicant=True,
+                comment=f"{document_type.upper()} uploaded.",
+            )
+        )
+        return self._serialize_document(workflow, document, document_file)
+
+    def review_document(
+        self,
+        reference: str,
+        *,
+        document_id: str,
+        reviewer: User,
+        role: str,
+        review_status: str,
+        note: str = "",
+    ) -> dict[str, Any] | None:
+        result = self._resolve_application(reference)
+        if not result:
+            return None
+        _, workflow, _ = result
+        if not self._is_reviewer(role):
+            raise PermissionError("Only type approvers and admins can review documents.")
+        document_result = self.workflow_repo.get_document(workflow.id, document_id)
+        if not document_result:
+            return None
+        document, document_file = document_result
+        document.review_status_code = review_status
+        self.db.add(document)
+        self.db.flush()
+
+        visibility = "APPLICANT" if review_status in {"REJECTED", "NEEDS_UPDATE"} else "INTERNAL"
+        if note:
+            self.workflow_repo.create_comment(
+                WorkflowApplicationComment(
+                    application_id=workflow.id,
+                    author_user_id=reviewer.id,
+                    visibility_code=visibility,
+                    body=note,
+                )
+            )
+        self.workflow_repo.create_event(
+            WorkflowEvent(
+                resource_kind="application",
+                resource_id=workflow.id,
+                event_type_code="TYPE_APPROVAL_DOCUMENT_REVIEWED",
+                label="Document Reviewed",
+                actor_name=f"{reviewer.first_name} {reviewer.last_name}".strip(),
+                actor_role=self._actor_role(reviewer),
+                is_visible_to_applicant=visibility != "INTERNAL",
+                comment=note or f"{document.document_type_code} marked {review_status.lower()}",
+            )
+        )
+        return self._serialize_document(workflow, document, document_file)
+
+    def download_document(
+        self,
+        reference: str,
+        *,
+        document_id: str,
+        user: User,
+        role: str,
+    ) -> dict[str, Any] | None:
+        result = self._resolve_application(reference)
+        if not result:
+            return None
+        _, workflow, _ = result
+        if not self._ensure_access(workflow, user=user, role=role):
+            raise PermissionError("You do not have access to this document.")
+        document_result = self.workflow_repo.get_document(workflow.id, document_id)
+        if not document_result:
+            return None
+        document, document_file = document_result
+        return self._serialize_document(workflow, document, document_file)
+
     def officer_action(
         self,
         application_id: str,
@@ -748,9 +1421,19 @@ class TypeApprovalService:
         officer: User,
         note: str = "",
     ) -> WorkflowApplication | None:
-        """Perform validate / approve / reject / remand / confirm_payment on a type approval application."""
-        workflow = self.workflow_repo.get_application(application_id)
-        if not workflow or workflow.application_type_code != "TYPE_APPROVAL":
+        """Perform validate / approve / reject / remand / confirm_payment / issue_certificate on a type approval application."""
+        result = self._resolve_application(application_id)
+        if result:
+            type_application, workflow, device = result
+        else:
+            workflow = self.workflow_repo.get_application(application_id)
+            if not workflow or workflow.application_type_code != "TYPE_APPROVAL":
+                return None
+            fallback_result = self._resolve_application(workflow.id)
+            if not fallback_result:
+                return None
+            type_application, workflow, device = fallback_result
+        if workflow.application_type_code != "TYPE_APPROVAL":
             return None
 
         # validate: PENDING → VALIDATED
@@ -759,61 +1442,168 @@ class TypeApprovalService:
         # reject: any → REJECTED
         # remand: any → PENDING/REMANDED
         action_map = {
-            "validate":        ("VALIDATED",         "VALIDATED",         "Application Validated"),
-            "approve":         ("APPROVED",          "PAYMENT_PENDING",   "Application Approved — Invoice Issued"),
-            "confirm_payment": ("CERTIFICATE_ISSUED","CERTIFICATE_ISSUED","Payment Confirmed — Certificate Issued"),
-            "reject":          ("REJECTED",          "REJECTED",          "Application Rejected"),
-            "remand":          ("PENDING",           "REMANDED",          "Application Remanded"),
+            "validate":          ("VALIDATED",          "VALIDATED",          "Application Validated"),
+            "approve":           ("APPROVED",           "PAYMENT_PENDING",    "Application Approved — Invoice Issued"),
+            "confirm_payment":   ("CERTIFICATE_ISSUED", "CERTIFICATE_ISSUED", "Payment Confirmed — Certificate Issued"),
+            "issue_certificate": ("CERTIFICATE_ISSUED", "ISSUED",             "Certificate Issued"),
+            "reject":            ("REJECTED",           "REJECTED",           "Application Rejected"),
+            "remand":            ("PENDING",            "REMANDED",           "Application Remanded"),
         }
         if action not in action_map:
             raise ValueError(f"Unsupported action: {action}")
 
+        reviewer_role = self._actor_role(officer)
+        if reviewer_role not in self.REVIEWER_ROLES:
+            raise PermissionError("Only type approvers and admins can progress type approval applications.")
+
+        if action == "validate":
+            documents = self.workflow_repo.list_documents(workflow.id)
+            required_documents = [document for document, _ in documents if document.is_required]
+            if required_documents and any(document.review_status_code != "APPROVED" for document in required_documents):
+                raise ValueError("All required documents must be approved before validation.")
+
+        old_status = workflow.current_status_code
         new_status, new_stage, label = action_map[action]
         workflow.current_status_code = new_status
         workflow.current_stage_code = new_stage
         self.db.flush()
 
-        if action == "approve":
-            # Create pending invoice for the type approval fee
-            today = _utcnow().date()
-            subtotal = 5000.0
-            vat = round(subtotal * 0.12, 2)
-            billing_repo = BillingRepository(self.db)
-            invoice = Invoice(
-                invoice_number=f"INV-TA-{today.year}-{uuid4().hex[:6].upper()}",
+        self.workflow_repo.create_status_history(
+            WorkflowApplicationStatusHistory(
                 application_id=workflow.id,
-                owner_user_id=workflow.applicant_user_id,
-                description=f"Type Approval Fee — {workflow.title}",
-                service_name="Type Approval",
-                currency_code="BWP",
-                subtotal_amount=subtotal,
-                vat_amount=vat,
-                total_amount=round(subtotal + vat, 2),
-                due_date=today + timedelta(days=14),
-                status_code="PENDING",
+                from_status_code=old_status,
+                to_status_code=new_status,
+                changed_by_user_id=officer.id,
+                comment=note or label,
             )
-            billing_repo.create_invoice(invoice)
+        )
+        self.workflow_repo.complete_open_tasks(workflow.id, note=note or label)
 
-        if action == "confirm_payment":
-            # Issue the certificate
-            today = _utcnow().date()
-            cert_repo = CertificateRepository(self.db)
-            officer_name = f"{officer.first_name} {officer.last_name}".strip()
-            cert = Certificate(
-                certificate_number=f"TA-{today.year}-{uuid4().hex[:6].upper()}",
-                certificate_type="TYPE_APPROVAL",
-                holder_name=officer_name,
-                device_name=workflow.title,
-                issue_date=today,
-                expiry_date=today.replace(year=today.year + 3),
-                status_code="ACTIVE",
-                qr_token=uuid4().hex,
-                application_id=workflow.id,
-                owner_user_id=workflow.applicant_user_id,
-                issued_by=officer_name,
-                remarks=note or None,
+        if action == "validate":
+            self.workflow_repo.create_task(
+                WorkflowApplicationTask(
+                    application_id=workflow.id,
+                    task_type_code="APPROVAL",
+                    title="Approve validated type approval application",
+                    assigned_to_user_id=officer.id,
+                    task_status_code="OPEN",
+                    due_at=workflow.expected_decision_at,
+                    notes=note or None,
+                    metadata_json={"module": "TYPE_APPROVAL"},
+                )
             )
-            self.db.add(cert)
+
+        if action == "approve":
+            invoices = self.billing_repo.list_invoices_for_application(workflow.id)
+            if not invoices:
+                due_date = _utcnow().date() + timedelta(days=14)
+                invoice = self.billing_repo.create_invoice(
+                    Invoice(
+                        invoice_number=f"INV-TA-{_utcnow().year}-{uuid4().hex[:6].upper()}",
+                        application_id=workflow.id,
+                        payer_org_id=workflow.applicant_org_id,
+                        owner_user_id=workflow.applicant_user_id,
+                        description=f"Type approval processing fee for {device.brand_name} {device.model_name}",
+                        service_name="Type Approval",
+                        currency_code="BWP",
+                        subtotal_amount=7500.00,
+                        vat_amount=900.00,
+                        total_amount=8400.00,
+                        due_date=due_date,
+                        status_code="UNPAID",
+                    )
+                )
+                self.billing_repo.create_invoice_item(
+                    InvoiceItem(
+                        invoice_id=invoice.id,
+                        line_no=1,
+                        item_code="TYPE_APPROVAL_FEE",
+                        description=f"Type approval fee for {device.brand_name} {device.model_name}",
+                        quantity=1,
+                        unit_amount=7500.00,
+                        line_total_amount=7500.00,
+                    )
+                )
+            self.workflow_repo.create_task(
+                WorkflowApplicationTask(
+                    application_id=workflow.id,
+                    task_type_code="PAYMENT",
+                    title="Await payment for approved type approval application",
+                    assigned_to_user_id=workflow.applicant_user_id,
+                    task_status_code="OPEN",
+                    due_at=_utcnow() + timedelta(days=14),
+                    notes=note or None,
+                    metadata_json={"module": "TYPE_APPROVAL"},
+                )
+            )
+
+        if action == "remand":
+            self.workflow_repo.create_task(
+                WorkflowApplicationTask(
+                    application_id=workflow.id,
+                    task_type_code="APPLICANT_UPDATE",
+                    title="Applicant to amend type approval submission",
+                    assigned_to_user_id=workflow.applicant_user_id,
+                    task_status_code="OPEN",
+                    due_at=_utcnow() + timedelta(days=7),
+                    notes=note or None,
+                    metadata_json={"module": "TYPE_APPROVAL"},
+                )
+            )
+
+        if note:
+            visibility = "INTERNAL"
+            if action in {"remand", "reject"}:
+                visibility = "APPLICANT"
+            self.workflow_repo.create_comment(
+                WorkflowApplicationComment(
+                    application_id=workflow.id,
+                    author_user_id=officer.id,
+                    visibility_code=visibility,
+                    body=note,
+                )
+            )
+
+        if action in {"issue_certificate", "confirm_payment"}:
+            invoices = self.billing_repo.list_invoices_for_application(workflow.id)
+            if invoices and any(invoice.status_code not in {"PAID", "COMPLETED"} for invoice in invoices):
+                raise ValueError("Type approval invoice must be paid before issuing a certificate.")
+            existing_certificates = self.certificate_repo.list_for_application(workflow.id)
+            cert = existing_certificates[0] if existing_certificates else None
+            if not cert:
+                today = _utcnow().date()
+                cert = Certificate(
+                    certificate_number=f"TA-{today.year}-{uuid4().hex[:6].upper()}",
+                    certificate_type="TYPE_APPROVAL",
+                    holder_name=self._applicant_display_name(workflow),
+                    device_name=f"{device.brand_name} {device.model_name}",
+                    issue_date=today,
+                    expiry_date=today.replace(year=today.year + 3),
+                    status_code="ACTIVE",
+                    qr_token=uuid4().hex,
+                    application_id=workflow.id,
+                    owner_user_id=workflow.applicant_user_id,
+                    issued_by=f"{officer.first_name} {officer.last_name}".strip(),
+                    remarks=note or None,
+                )
+                self.db.add(cert)
+                self.db.flush()
+            record = self.device_repo.get_type_approval_record_by_application(type_application.id)
+            if not record:
+                record = TypeApprovalRecord(
+                    device_model_id=type_application.device_model_id,
+                    certificate_id=cert.id,
+                    application_id=type_application.id,
+                    status_code="APPROVED",
+                    approval_date=_utcnow().date(),
+                    applicant_name=self._applicant_display_name(workflow),
+                )
+                self.db.add(record)
+            else:
+                record.certificate_id = cert.id
+                record.status_code = "APPROVED"
+                record.approval_date = _utcnow().date()
+                self.db.add(record)
             self.db.flush()
             # Mark invoice paid if one exists
             billing_repo = BillingRepository(self.db)
@@ -824,12 +1614,12 @@ class TypeApprovalService:
 
         self.workflow_repo.create_event(
             WorkflowEvent(
-                resource_kind="type_approval_application",
+                resource_kind="application",
                 resource_id=workflow.id,
                 event_type_code=f"TYPE_APPROVAL_{action.upper()}",
                 label=label,
                 actor_name=f"{officer.first_name} {officer.last_name}".strip(),
-                actor_role="officer",
+                actor_role=reviewer_role,
                 is_visible_to_applicant=True,
                 comment=note or None,
             )
@@ -844,10 +1634,21 @@ class TypeApprovalService:
                     body=f"Your type approval application {workflow.application_number}: {label.lower()}.",
                     status_code="SENT",
                     sent_at=_utcnow(),
-                    source_table="workflow_applications",
+                    source_table="workflow.applications",
                     source_id=workflow.id,
                 )
             )
+        self.audit_repo.create_log(
+            AuditLog(
+                actor_user_id=officer.id,
+                action_code=f"TYPE_APPROVAL_{action.upper()}",
+                entity_table="workflow.applications",
+                entity_id=workflow.id,
+                before_json={"status": old_status},
+                after_json={"status": new_status, "stage": new_stage},
+                metadata_json={"module": "TYPE_APPROVAL", "applicationNumber": workflow.application_number},
+            )
+        )
         return workflow
 
 
@@ -916,7 +1717,7 @@ class CertificateService:
         self.repo = CertificateRepository(db)
 
     def list_certificates(self, user: User | None, role: str, cert_type: str | None = None) -> list[Certificate]:
-        user_id = user.id if user and role not in {"officer", "admin"} else None
+        user_id = user.id if user and role not in {"officer", "type_approver", "admin"} else None
         return self.repo.list_certificates(user_id=user_id, cert_type=cert_type)
 
     def verify(self, token: str) -> Certificate | None:
@@ -931,15 +1732,15 @@ class BillingService:
         self.storage = StorageAdapter()
 
     def list_invoices(self, user: User | None, role: str) -> list[Invoice]:
-        user_id = user.id if user and role not in {"officer", "admin"} else None
+        user_id = user.id if user and role not in {"officer", "type_approver", "admin"} else None
         return self.repo.list_invoices(user_id=user_id)
 
     def list_payments(self, user: User | None, role: str) -> list[Payment]:
-        user_id = user.id if user and role not in {"officer", "admin"} else None
+        user_id = user.id if user and role not in {"officer", "type_approver", "admin"} else None
         return self.repo.list_payments(user_id=user_id)
 
     def list_receipts(self, user: User | None, role: str) -> list[Receipt]:
-        user_id = user.id if user and role not in {"officer", "admin"} else None
+        user_id = user.id if user and role not in {"officer", "type_approver", "admin"} else None
         return self.repo.list_receipts(user_id=user_id)
 
     def create_payment(self, *, payload: dict[str, Any], user: User | None) -> dict[str, Any]:

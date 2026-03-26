@@ -36,6 +36,8 @@ GOOGLE_APPLICATION_CREDENTIALS=path/to/your/service-account.json
 - `backend/`: FastAPI service
 - `BOCRA_Website_Audit_Report.pdf`: audit reference
 - `bocra_website_audit_report.md`: audit notes
+- `docs/live_supabase_schema_overview.md`: quick schema map and delta summary
+- `docs/live_schema_backend_mapping.md`: backend coverage vs live schema
 
 ## API Features
 

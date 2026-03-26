@@ -150,9 +150,9 @@ async def submit_complaint(
 
 
 @router.get("/api/complaints/{complaint_id}")
-def complaint_detail(complaint_id: str, _: User = Depends(get_current_user), db: Session = Depends(db_session)):
+def complaint_detail(complaint_id: str, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
     service = ComplaintService(db)
-    detail = service.get_detail(complaint_id)
+    detail = service.get_detail(complaint_id, user=user, role=_role_for_user(db, user))
     if not detail:
         raise HTTPException(status_code=404, detail="Complaint not found")
     complaint = detail["complaint"]
@@ -161,8 +161,8 @@ def complaint_detail(complaint_id: str, _: User = Depends(get_current_user), db:
 
 
 @router.get("/api/complaints/{complaint_id}/messages")
-def complaint_messages(complaint_id: str, _: User = Depends(get_current_user), db: Session = Depends(db_session)):
-    detail = ComplaintService(db).get_detail(complaint_id)
+def complaint_messages(complaint_id: str, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    detail = ComplaintService(db).get_detail(complaint_id, user=user, role=_role_for_user(db, user))
     if not detail:
         raise HTTPException(status_code=404, detail="Complaint not found")
     return present_complaint_messages(detail["messages"])
@@ -179,7 +179,7 @@ async def add_complaint_message(
     content = str(body.get("content", "")).strip()
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    message = ComplaintService(db).add_message(complaint_id, body=content, user=user)
+    message = ComplaintService(db).add_message(complaint_id, body=content, user=user, role=_role_for_user(db, user))
     if not message:
         raise HTTPException(status_code=404, detail="Complaint not found")
     return {"success": True, "message": present_complaint_messages([message])[0]}
@@ -211,10 +211,10 @@ async def officer_complaint_action(
 def download_attachment(
     complaint_id: str,
     attachment_id: str,
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: Session = Depends(db_session),
 ):
-    result = ComplaintService(db).get_attachment_bytes(complaint_id, attachment_id)
+    result = ComplaintService(db).get_attachment_bytes(complaint_id, attachment_id, user=user, role=_role_for_user(db, user))
     if not result:
         raise HTTPException(status_code=404, detail="Attachment not found")
     attachment, content = result

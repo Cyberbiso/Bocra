@@ -348,14 +348,7 @@ export default function CybersecurityPage() {
           <p className="text-xs text-gray-500 mt-0.5">Track the status of incidents you have reported</p>
         </div>
 
-        {role === 'public' ? (
-          <div className="px-6 py-10 text-center">
-            <Lock className="size-8 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm font-medium text-gray-500">Sign in to view your submitted incident reports</p>
-            <p className="text-xs text-gray-400 mt-1">Incident tracking is available to registered portal users</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
+        <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
@@ -378,8 +371,7 @@ export default function CybersecurityPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* ── Section 4: Response resources ── */}

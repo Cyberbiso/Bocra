@@ -43,7 +43,7 @@ def create_schemas() -> None:
         return
 
     # Schema names are a fixed internal whitelist — never derived from user input.
-    _SCHEMAS = frozenset({"iam", "workflow", "complaints", "licensing", "device", "billing", "docs", "knowledge", "agent", "notify", "cirt"})
+    _SCHEMAS = frozenset({"iam", "workflow", "complaints", "licensing", "device", "billing", "docs", "knowledge", "agent", "notify", "cirt", "audit"})
 
     with engine.begin() as conn:
         for schema in _SCHEMAS:

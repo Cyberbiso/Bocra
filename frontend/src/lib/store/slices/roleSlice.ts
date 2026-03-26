@@ -6,7 +6,7 @@ interface RoleState {
 }
 
 const initialState: RoleState = {
-  role: 'public',
+  role: 'applicant',
 }
 
 const roleSlice = createSlice({

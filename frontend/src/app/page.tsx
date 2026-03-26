@@ -4,7 +4,6 @@ import StatsDashboard from "@/components/StatsDashboard";
 import ComplaintSection from "@/components/ComplaintSection";
 import ConsumerTools from "@/components/ConsumerTools";
 import NewsSection from "@/components/NewsSection";
-import Chatbot from "@/components/Chatbot";
 
 export default function Home() {
   return (
@@ -15,7 +14,6 @@ export default function Home() {
       <ComplaintSection />
       <ConsumerTools />
       <NewsSection />
-      <Chatbot />
     </>
   );
 }

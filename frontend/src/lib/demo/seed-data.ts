@@ -498,7 +498,7 @@ export const DEMO_NOTIFICATIONS: Notification[] = [
     body: 'Invoice INV-2026-00201 for ISP Licence Renewal was due on 15 Feb 2026. Pay immediately to avoid licence suspension.',
     isRead: false,
     timestamp: '2026-03-20T09:15:00.000Z',
-    moduleLink: '/dashboard/billing',
+    moduleLink: '/dashboard/payments',
   },
   {
     id: 'notif-3',
@@ -551,7 +551,7 @@ export const DEMO_NOTIFICATIONS: Notification[] = [
     body: 'Invoice INV-2026-00318 for Broadcasting Licence annual fee (BWP 48,500) is due on 1 Apr 2026.',
     isRead: false,
     timestamp: '2026-03-22T08:00:00.000Z',
-    moduleLink: '/dashboard/billing',
+    moduleLink: '/dashboard/payments',
   },
   {
     id: 'notif-9',

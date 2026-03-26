@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type DashboardRole = 'public' | 'applicant' | 'officer' | 'admin'
+export type DashboardRole = 'applicant' | 'officer' | 'admin'
 
 interface RoleStore {
   role: DashboardRole
@@ -11,7 +11,7 @@ interface RoleStore {
 export const useRoleStore = create<RoleStore>()(
   persist(
     (set) => ({
-      role: 'public',
+      role: 'applicant',
       setRole: (role) => set({ role }),
     }),
     { name: 'bocra-role' }

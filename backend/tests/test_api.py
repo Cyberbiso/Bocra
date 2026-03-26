@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.config import get_settings
+from app.core.security import new_session_token, session_expires_at
 from app.core.database import SessionLocal
 from app.models.entities import (
     AgentAction,
@@ -11,16 +13,37 @@ from app.models.entities import (
     AgentToolCall,
     Complaint,
     LicenseApplication,
+    SessionToken,
     TypeApprovalApplication,
+    User,
 )
+
+settings = get_settings()
+
+
+def _login_with_local_session(client: TestClient, email: str) -> None:
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(email=email).one()
+        token = new_session_token()
+        session.add(SessionToken(token=token, user_id=user.id, expires_at=session_expires_at()))
+        session.commit()
+    client.cookies.set(settings.session_cookie_name, token)
 
 
 def login_as_applicant(client: TestClient) -> None:
-    response = client.post(
-        "/api/auth/login",
-        json={"email": "applicant@bocra.demo", "password": "Password123!"},
-    )
-    assert response.status_code == 200, response.text
+    _login_with_local_session(client, "applicant@bocra.demo")
+
+
+def login_as_officer(client: TestClient) -> None:
+    _login_with_local_session(client, "officer@bocra.demo")
+
+
+def login_as_type_approver(client: TestClient) -> None:
+    _login_with_local_session(client, "approver@bocra.demo")
+
+
+def login_as_admin(client: TestClient) -> None:
+    _login_with_local_session(client, "admin@bocra.demo")
 
 
 def run_agent(client: TestClient, thread_id: str, content: str) -> str:
@@ -178,6 +201,141 @@ def test_workflow_creation_for_licensing_type_approval_and_payment() -> None:
         assert accreditation.json()["type"] == "customer"
 
 
+def test_type_approval_review_queue_detail_and_certificate_workflow() -> None:
+    with TestClient(app) as client:
+        login_as_applicant(client)
+
+        created = client.post(
+            "/api/type-approval/applications",
+            json={
+                "accreditationType": "customer",
+                "brandName": "Queue Brand",
+                "modelName": "Queue Phone",
+                "simEnabled": "yes",
+                "techSpec": "LTE",
+                "sampleImei": "354789100234561",
+                "countryOfManufacture": "Botswana",
+                "declaration": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        application_number = created.json()["applicationNumber"]
+
+        applicant_list = client.get("/api/type-approval/applications")
+        assert applicant_list.status_code == 200, applicant_list.text
+        assert any(item["applicationNumber"] == application_number for item in applicant_list.json()["data"])
+
+        applicant_detail = client.get(f"/api/type-approval/applications/{application_number}")
+        assert applicant_detail.status_code == 200, applicant_detail.text
+        workflow_id = applicant_detail.json()["summary"]["id"]
+
+        applicant_comment = client.post(
+            f"/api/type-approval/applications/{application_number}/comments",
+            json={"body": "Please note that the LTE report is the latest signed version.", "visibility": "APPLICANT"},
+        )
+        assert applicant_comment.status_code == 200, applicant_comment.text
+
+        party = client.post(
+            f"/api/type-approval/applications/{application_number}/parties",
+            json={
+                "partyType": "manufacturer",
+                "displayName": "Queue Devices Manufacturing Ltd",
+                "metadata": {"country": "Botswana"},
+            },
+        )
+        assert party.status_code == 200, party.text
+        assert party.json()["partyType"] == "MANUFACTURER"
+
+        upload = client.post(
+            f"/api/type-approval/applications/{application_number}/documents",
+            data={"documentType": "lab_report", "isRequired": "true"},
+            files=[("file", ("lab-report.txt", b"lab certification data", "text/plain"))],
+        )
+        assert upload.status_code == 200, upload.text
+        document_id = upload.json()["id"]
+
+        download = client.get(f"/api/type-approval/applications/{application_number}/documents/{document_id}/download")
+        assert download.status_code == 200, download.text
+        assert download.content == b"lab certification data"
+
+        login_as_type_approver(client)
+
+        queue = client.get("/api/type-approval/queue")
+        assert queue.status_code == 200, queue.text
+        assert any(item["applicationNumber"] == application_number for item in queue.json()["data"])
+
+        review_document = client.post(
+            f"/api/type-approval/applications/{application_number}/documents/{document_id}/review",
+            json={"reviewStatus": "APPROVED", "note": "Lab report checked and accepted."},
+        )
+        assert review_document.status_code == 200, review_document.text
+        assert review_document.json()["reviewStatus"] == "APPROVED"
+
+        internal_note = client.post(
+            f"/api/type-approval/applications/{application_number}/comments",
+            json={"body": "Internal note: all mandatory documents are now complete.", "visibility": "INTERNAL"},
+        )
+        assert internal_note.status_code == 200, internal_note.text
+        assert internal_note.json()["visibility"] == "INTERNAL"
+
+        validate = client.post(
+            f"/api/type-approval/applications/{workflow_id}/action",
+            json={"action": "validate", "note": "Technical checks passed."},
+        )
+        assert validate.status_code == 200, validate.text
+        assert validate.json()["status"] == "VALIDATED"
+
+        approve = client.post(
+            f"/api/type-approval/applications/{workflow_id}/action",
+            json={"action": "approve", "note": "Ready for invoicing."},
+        )
+        assert approve.status_code == 200, approve.text
+        assert approve.json()["status"] == "APPROVED"
+
+        officer_detail = client.get(f"/api/type-approval/applications/{application_number}")
+        assert officer_detail.status_code == 200, officer_detail.text
+        invoice_id = officer_detail.json()["invoices"][0]["id"]
+
+        login_as_applicant(client)
+        payment = client.post(
+            "/api/payments",
+            json={"invoiceId": invoice_id, "method": "mobile_money", "reference": "TA-QUEUE-PAY-001"},
+        )
+        assert payment.status_code == 200, payment.text
+        assert payment.json()["success"] is True
+
+        login_as_type_approver(client)
+        issued = client.post(
+            f"/api/type-approval/applications/{workflow_id}/action",
+            json={"action": "issue_certificate", "note": "Payment confirmed."},
+        )
+        assert issued.status_code == 200, issued.text
+        assert issued.json()["status"] == "CERTIFICATE_ISSUED"
+
+        final_detail = client.get(f"/api/type-approval/applications/{application_number}")
+        assert final_detail.status_code == 200, final_detail.text
+        final_payload = final_detail.json()
+        assert final_payload["summary"]["certificateCount"] >= 1
+        assert final_payload["record"] is not None
+        assert any(comment["visibility"] == "INTERNAL" for comment in final_payload["comments"])
+        assert any(document["reviewStatus"] == "APPROVED" for document in final_payload["documents"])
+        assert any(party_item["partyType"] == "MANUFACTURER" for party_item in final_payload["parties"])
+
+
+def test_officer_cannot_access_type_approval_reviewer_routes() -> None:
+    with TestClient(app) as client:
+        login_as_officer(client)
+
+        queue = client.get("/api/type-approval/queue")
+        assert queue.status_code == 403
+
+        review = client.post(
+            "/api/type-approval/applications/APP-2025-00387/action",
+            json={"action": "validate", "note": "Trying reviewer route as generic officer."},
+        )
+        assert review.status_code == 403
+
+
 def test_agent_streaming_and_audit_logs() -> None:
     with TestClient(app) as client:
         login_as_applicant(client)
@@ -268,3 +426,262 @@ def test_agent_capabilities_cover_read_write_and_audit() -> None:
             type_thread = session.query(AgentThread).filter_by(external_thread_id="agent-type-approval-capability").one()
             type_actions = session.query(AgentAction).filter_by(thread_id=type_thread.id).all()
             assert any(action.target_table == "device.type_approval_applications" for action in type_actions)
+
+
+def test_type_approver_agent_can_read_and_progress_type_approval_queue() -> None:
+    with TestClient(app) as client:
+        login_as_type_approver(client)
+
+        queue_reply = run_agent(client, "agent-type-approval-queue", "Show me the type approval queue")
+        assert "type approval queue" in queue_reply.lower()
+
+        review_reply = run_agent(
+            client,
+            "agent-type-approval-review",
+            "Validate type approval application APP-2025-00387 because the documents are complete.",
+        )
+        assert "validated" in review_reply.lower() or "status validated" in review_reply.lower()
+
+
+def test_officer_agent_handles_complaints_and_licensing_without_crossing_into_type_approval() -> None:
+    with TestClient(app) as client:
+        login_as_applicant(client)
+
+        complaint = client.post(
+            "/api/complaints",
+            data={
+                "category": "billing",
+                "operator": "Orange Botswana",
+                "subject": "Agent officer routing complaint",
+                "description": "Test complaint so the officer agent can inspect the case.",
+                "incidentDate": "2026-03-24",
+                "name": "Naledi Molefe",
+                "email": "applicant@bocra.demo",
+                "phone": "+26771234567",
+                "consentGiven": "true",
+            },
+        )
+        assert complaint.status_code == 200, complaint.text
+        complaint_number = complaint.json()["id"]
+
+        licence = client.post(
+            "/api/licence-applications",
+            json={
+                "category": "telecommunications",
+                "licenceType": "National Services Licence",
+                "applicantName": "Naledi Molefe",
+                "applicantEmail": "applicant@bocra.demo",
+                "coverageArea": "Gaborone",
+                "formData": {"source": "officer-agent-routing-test"},
+            },
+        )
+        assert licence.status_code == 200, licence.text
+        application_number = licence.json()["applicationNumber"]
+
+        login_as_officer(client)
+
+        complaint_reply = run_agent(client, "agent-officer-complaint", f"Show complaint {complaint_number}")
+        assert complaint_number in complaint_reply
+        assert "subject:" in complaint_reply.lower()
+
+        licence_reply = run_agent(client, "agent-officer-licence", f"Show {application_number}")
+        assert application_number in licence_reply
+        assert "applicant:" in licence_reply.lower()
+
+        approval_reply = run_agent(client, "agent-officer-licence", "Approve it because technical review passed.")
+        assert application_number in approval_reply
+        assert "approved" in approval_reply.lower()
+
+        licence_detail = client.get(f"/api/licence-applications/{application_number}")
+        assert licence_detail.status_code == 200, licence_detail.text
+        assert licence_detail.json()["summary"]["status"] == "APPROVED"
+
+        wrong_lane_reply = run_agent(client, "agent-officer-type-approval-block", "Show APP-2025-00387")
+        assert "type approvers and admins" in wrong_lane_reply.lower()
+
+        queue_reply = run_agent(client, "agent-officer-type-approval-queue-block", "Show me the type approval queue")
+        assert "type approvers and admins" in queue_reply.lower()
+
+
+def test_type_approver_agent_uses_thread_context_without_entering_officer_workflows() -> None:
+    with TestClient(app) as client:
+        login_as_applicant(client)
+
+        type_approval = client.post(
+            "/api/type-approval/applications",
+            json={
+                "accreditationType": "customer",
+                "brandName": "Context Brand",
+                "modelName": "Context Router",
+                "simEnabled": "yes",
+                "techSpec": "Wi-Fi 6",
+                "sampleImei": "354789100234561",
+                "countryOfManufacture": "Botswana",
+                "declaration": True,
+            },
+        )
+        assert type_approval.status_code == 200, type_approval.text
+        application_number = type_approval.json()["applicationNumber"]
+
+        login_as_type_approver(client)
+
+        detail_reply = run_agent(client, "agent-type-context", f"Show {application_number}")
+        assert application_number in detail_reply
+        assert "context brand" in detail_reply.lower()
+
+        follow_up_reply = run_agent(client, "agent-type-context", "Show documents")
+        assert application_number in follow_up_reply
+        assert "documents" in follow_up_reply.lower()
+
+        complaint_lane_reply = run_agent(client, "agent-type-complaint-block", "Show me the complaint queue")
+        assert "officers and admins" in complaint_lane_reply.lower()
+
+        licensing_lane_reply = run_agent(client, "agent-type-licensing-block", "Show APP-2025-00412")
+        assert "officers and admins" in licensing_lane_reply.lower()
+
+
+def test_admin_agent_can_route_across_all_workflow_lanes() -> None:
+    with TestClient(app) as client:
+        login_as_applicant(client)
+
+        complaint = client.post(
+            "/api/complaints",
+            data={
+                "category": "coverage",
+                "operator": "Mascom Wireless",
+                "subject": "Admin agent routing complaint",
+                "description": "Complaint created for admin agent workflow coverage.",
+                "incidentDate": "2026-03-24",
+                "name": "Naledi Molefe",
+                "email": "applicant@bocra.demo",
+                "phone": "+26771234567",
+                "consentGiven": "true",
+            },
+        )
+        assert complaint.status_code == 200, complaint.text
+        complaint_number = complaint.json()["id"]
+
+        licence = client.post(
+            "/api/licence-applications",
+            json={
+                "category": "telecommunications",
+                "licenceType": "Admin Review Licence",
+                "applicantName": "Naledi Molefe",
+                "applicantEmail": "applicant@bocra.demo",
+                "coverageArea": "Francistown",
+                "formData": {"source": "admin-agent-routing-test"},
+            },
+        )
+        assert licence.status_code == 200, licence.text
+        licence_application_number = licence.json()["applicationNumber"]
+
+        type_approval = client.post(
+            "/api/type-approval/applications",
+            json={
+                "accreditationType": "customer",
+                "brandName": "Admin Brand",
+                "modelName": "Admin Phone",
+                "simEnabled": "yes",
+                "techSpec": "5G",
+                "sampleImei": "354789100234561",
+                "countryOfManufacture": "Botswana",
+                "declaration": True,
+            },
+        )
+        assert type_approval.status_code == 200, type_approval.text
+        type_approval_number = type_approval.json()["applicationNumber"]
+
+        login_as_admin(client)
+
+        summary_reply = run_agent(client, "agent-admin-summary", "Show me the operational queue summary")
+        assert "operational queues" in summary_reply.lower()
+
+        complaint_reply = run_agent(client, "agent-admin-complaint", f"Show complaint {complaint_number}")
+        assert complaint_number in complaint_reply
+
+        licensing_reply = run_agent(client, "agent-admin-licence", f"Show {licence_application_number}")
+        assert licence_application_number in licensing_reply
+        assert "applicant:" in licensing_reply.lower()
+
+        type_approval_reply = run_agent(client, "agent-admin-type-approval", f"Show {type_approval_number}")
+        assert type_approval_number in type_approval_reply
+        assert "admin brand" in type_approval_reply.lower()
+
+
+def test_officer_agent_can_continue_from_queue_selection_over_multiple_turns() -> None:
+    with TestClient(app) as client:
+        login_as_applicant(client)
+
+        licence = client.post(
+            "/api/licence-applications",
+            json={
+                "category": "telecommunications",
+                "licenceType": "Queue Memory Licence",
+                "applicantName": "Naledi Molefe",
+                "applicantEmail": "applicant@bocra.demo",
+                "coverageArea": "Maun",
+                "formData": {"source": "queue-memory-test"},
+            },
+        )
+        assert licence.status_code == 200, licence.text
+        application_number = licence.json()["applicationNumber"]
+
+        login_as_officer(client)
+
+        queue_reply = run_agent(client, "agent-officer-queue-memory", "Show me the licence queue")
+        assert application_number in queue_reply
+
+        open_reply = run_agent(client, "agent-officer-queue-memory", "Open the first application")
+        assert application_number in open_reply
+        assert "queue memory licence" in open_reply.lower()
+
+        approve_reply = run_agent(client, "agent-officer-queue-memory", "Approve it because all licensing checks passed.")
+        assert application_number in approve_reply
+        assert "approved" in approve_reply.lower()
+
+
+def test_type_approver_agent_can_continue_from_queue_into_document_review() -> None:
+    with TestClient(app) as client:
+        login_as_applicant(client)
+
+        created = client.post(
+            "/api/type-approval/applications",
+            json={
+                "accreditationType": "customer",
+                "brandName": "Memory Brand",
+                "modelName": "Memory Phone",
+                "simEnabled": "yes",
+                "techSpec": "LTE",
+                "sampleImei": "354789100234561",
+                "countryOfManufacture": "Botswana",
+                "declaration": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        application_number = created.json()["applicationNumber"]
+
+        upload = client.post(
+            f"/api/type-approval/applications/{application_number}/documents",
+            data={"documentType": "lab_report", "isRequired": "true"},
+            files=[("file", ("memory-lab-report.txt", b"memory lab data", "text/plain"))],
+        )
+        assert upload.status_code == 200, upload.text
+
+        login_as_type_approver(client)
+
+        queue_reply = run_agent(client, "agent-type-queue-memory", "Show me the type approval queue")
+        assert application_number in queue_reply
+
+        open_reply = run_agent(client, "agent-type-queue-memory", "Open the first one")
+        assert application_number in open_reply
+        assert "memory brand" in open_reply.lower()
+
+        documents_reply = run_agent(client, "agent-type-queue-memory", "Show documents")
+        assert "lab_report" in documents_reply.lower()
+
+        review_reply = run_agent(client, "agent-type-queue-memory", "Approve the document because it has been checked.")
+        assert application_number in review_reply
+        assert "approved" in review_reply.lower()
+
+        note_reply = run_agent(client, "agent-type-queue-memory", "Add internal note that the supporting documents are complete.")
+        assert "internal comment" in note_reply.lower()

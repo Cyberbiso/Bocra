@@ -593,12 +593,12 @@ export default function AdminPage() {
   const router   = useRouter()
 
   useEffect(() => {
-    if (role !== 'officer') {
+    if (role === 'applicant') {
       router.replace('/dashboard/home')
     }
   }, [role, router])
 
-  if (role !== 'officer') {
+  if (role === 'applicant') {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
         <Lock className="size-10 text-gray-200" />

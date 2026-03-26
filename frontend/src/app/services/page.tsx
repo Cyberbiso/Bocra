@@ -1,4 +1,3 @@
-import Chatbot from "@/components/Chatbot";
 import ServicesHub from "@/components/ServicesHub";
 
 export const metadata = {
@@ -8,10 +7,5 @@ export const metadata = {
 };
 
 export default function ServicesPage() {
-  return (
-    <>
-      <ServicesHub />
-      <Chatbot />
-    </>
-  );
+  return <ServicesHub />;
 }

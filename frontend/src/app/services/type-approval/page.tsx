@@ -1,5 +1,4 @@
 import TypeApproval from "@/components/TypeApproval";
-import Chatbot from "@/components/Chatbot";
 
 export const metadata = {
   title: "Type Approval Certificates | Services | BOCRA",
@@ -8,10 +7,5 @@ export const metadata = {
 };
 
 export default function TypeApprovalPage() {
-  return (
-    <>
-      <TypeApproval />
-      <Chatbot />
-    </>
-  );
+  return <TypeApproval />;
 }

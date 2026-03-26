@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import Providers from "./providers";
 import FooterConditional from "@/components/FooterConditional";
 import NavbarConditional from "@/components/NavbarConditional";
+import ChatbotConditional from "@/components/ChatbotConditional";
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-sans' });
 
@@ -54,6 +55,7 @@ export default function RootLayout({
             <main id="main-content" className="flex-1">
               {children}
             </main>
+            <ChatbotConditional />
             <FooterConditional />
           </div>
         </Providers>

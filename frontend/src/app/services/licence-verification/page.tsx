@@ -1,5 +1,4 @@
 import LicenseVerification from "@/components/LicenseVerification";
-import Chatbot from "@/components/Chatbot";
 
 export const metadata = {
   title: "Licence Verification | Services | BOCRA",
@@ -8,10 +7,5 @@ export const metadata = {
 };
 
 export default function LicenceVerificationPage() {
-  return (
-    <>
-      <LicenseVerification />
-      <Chatbot />
-    </>
-  );
+  return <LicenseVerification />;
 }

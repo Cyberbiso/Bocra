@@ -243,9 +243,9 @@ def seed_database(db: Session) -> None:
 
     # Create seed accounts in Supabase Auth (admin API, no email confirmation needed).
     # These simulate accounts that would normally be created via the external portal
-    # at typeapproval.bocra.org.bw — all use password: Password123!
+    # at typeapproval.bocra.org.bw — all use password: bocra2026
     supabase = SupabaseAuthAdapter()
-    _SEED_PASSWORD = "Password123!"
+    _SEED_PASSWORD = "bocra2026"
     _SEED_ACCOUNTS = [
         ("public",    "public@bocra.demo",    "Public",  "User",   None,            None),
         ("applicant", "applicant@bocra.demo", "Naledi",  "Molefe", "+26771234567",  None),

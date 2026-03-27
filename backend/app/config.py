@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     session_cookie_name: str = Field(default="bocra-session", alias="SESSION_COOKIE_NAME")
     session_ttl_hours: int = Field(default=24, alias="SESSION_TTL_HOURS")
+    allow_demo_auth: bool = Field(default=True, alias="ALLOW_DEMO_AUTH")
     local_auth_salt: str = Field(default="bocra-demo-salt", alias="LOCAL_AUTH_SALT")
 
     supabase_url: str = Field(default="", alias="SUPABASE_URL")

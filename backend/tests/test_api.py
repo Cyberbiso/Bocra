@@ -72,6 +72,21 @@ def test_auth_session_and_profile() -> None:
         assert "applicant" in profile["roles"]
 
 
+def test_demo_login_accepts_judge_password() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/auth/login",
+            json={"email": "admin@bocra.demo", "password": "bocra2026"},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["success"] is True
+        assert payload["user"]["email"] == "admin@bocra.demo"
+        assert "admin" in payload["user"]["roles"]
+        assert response.cookies.get(settings.session_cookie_name)
+
+
 def test_dashboard_contracts() -> None:
     with TestClient(app) as client:
         login_as_applicant(client)

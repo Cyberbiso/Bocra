@@ -7,6 +7,7 @@ import {
   DEMO_LOGIN_USERS,
   DEMO_PASSWORD,
 } from '@/lib/server-auth'
+import { backendFetch } from '@/lib/backend'
 import { isRole } from '@/lib/types/roles'
 
 export const runtime = 'nodejs'
@@ -126,6 +127,23 @@ export async function POST(request: Request) {
         maxAge: SESSION_SECONDS,
       })
 
+      // Also create a backend session so proxied API calls are authenticated
+      try {
+        const beRes = await backendFetch('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password }),
+        })
+        if (beRes.ok) {
+          const beData = await beRes.json()
+          const beToken = beData?.session?.token
+          if (beToken) {
+            response.cookies.set('bocra-session', beToken, {
+              httpOnly: true, sameSite: 'lax', path: '/', maxAge: SESSION_SECONDS,
+            })
+          }
+        }
+      } catch { /* backend unreachable — frontend session still works */ }
+
       return response
     } catch (err) {
       console.error('Login error', err)
@@ -145,6 +163,24 @@ export async function POST(request: Request) {
         path: '/',
         maxAge: SESSION_SECONDS,
       })
+
+      // Also create a backend session for demo users
+      try {
+        const beRes = await backendFetch('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password }),
+        })
+        if (beRes.ok) {
+          const beData = await beRes.json()
+          const beToken = beData?.session?.token
+          if (beToken) {
+            response.cookies.set('bocra-session', beToken, {
+              httpOnly: true, sameSite: 'lax', path: '/', maxAge: SESSION_SECONDS,
+            })
+          }
+        }
+      } catch { /* backend unreachable */ }
+
       return response
     }
   }

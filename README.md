@@ -133,6 +133,8 @@ Visit `http://localhost:3000` — the frontend will communicate with the backend
 
 Use the seeded demo accounts for walkthroughs and judging:
 
+All demo accounts below use the password `bocra2026`.
+
 - `admin@bocra.demo` / `bocra2026`
 - `officer@bocra.demo` / `bocra2026`
 - `approver@bocra.demo` / `bocra2026`

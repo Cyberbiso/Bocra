@@ -73,6 +73,58 @@ class SupabaseAuthAdapter:
             logger.warning("Supabase get_user failed: %s", exc)
         return None
 
+    def get_user_from_session_token(self, token: str) -> dict[str, Any] | None:
+        """Look up a session in the iam.sessions table and return the user row.
+
+        The frontend creates random hex tokens stored in iam.sessions.
+        This lets the backend validate those tokens without needing a JWT.
+        Requires the service role key for direct table access.
+        """
+        service_key = settings.supabase_service_role_key
+        if not self.enabled or not service_key:
+            return None
+        headers = {
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+        }
+        try:
+            # 1. Look up the session token
+            sess_resp = httpx.get(
+                f"{settings.supabase_url}/rest/v1/sessions",
+                params={"token": f"eq.{token}", "select": "user_id,expires_at"},
+                headers={**headers, "Accept-Profile": "iam"},
+                timeout=10.0,
+            )
+            if not sess_resp.is_success:
+                return None
+            sessions = sess_resp.json()
+            if not sessions:
+                return None
+            session = sessions[0]
+
+            # Check expiry
+            from datetime import datetime, timezone
+            expires_at = datetime.fromisoformat(session["expires_at"].replace("Z", "+00:00"))
+            if expires_at < datetime.now(timezone.utc):
+                return None
+
+            # 2. Get the user
+            user_resp = httpx.get(
+                f"{settings.supabase_url}/rest/v1/users",
+                params={"id": f"eq.{session['user_id']}", "select": "id,email,first_name,last_name"},
+                headers={**headers, "Accept-Profile": "iam"},
+                timeout=10.0,
+            )
+            if not user_resp.is_success:
+                return None
+            users = user_resp.json()
+            if not users:
+                return None
+            return users[0]
+        except httpx.RequestError as exc:
+            logger.warning("Supabase session token lookup failed: %s", exc)
+            return None
+
     def sign_out(self, access_token: str) -> None:
         if not self.enabled or not access_token:
             return

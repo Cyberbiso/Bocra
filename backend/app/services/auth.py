@@ -62,19 +62,28 @@ class AuthService:
     # ── Token validation ───────────────────────────────────────────────────
 
     def get_user_from_token(self, access_token: str) -> LoginResult | None:
+        # 1. Check local session tokens (created by backend login)
         session = self.repo.get_active_session(access_token)
         if session and session.user:
             return self._result_for_user(session.user, access_token)
 
-        """Validate a Supabase JWT and return the corresponding local user context."""
+        # 2. Validate as Supabase JWT
         sb_user = self.supabase.get_user(access_token)
-        if not sb_user or not sb_user.get("email"):
-            return None
+        if sb_user and sb_user.get("email"):
+            user = self._sync_profile(sb_user, sb_user["email"])
+            if self.db.new or self.db.dirty:
+                self.db.commit()
+            return self._result_for_user(user, access_token)
 
-        user = self._sync_profile(sb_user, sb_user["email"])
-        if self.db.new or self.db.dirty:
-            self.db.commit()
-        return self._result_for_user(user, access_token)
+        # 3. Check Supabase iam.sessions table (tokens created by frontend login)
+        iam_user = self.supabase.get_user_from_session_token(access_token)
+        if iam_user and iam_user.get("email"):
+            user = self._sync_profile(iam_user, iam_user["email"])
+            if self.db.new or self.db.dirty:
+                self.db.commit()
+            return self._result_for_user(user, access_token)
+
+        return None
 
     # ── Helpers ────────────────────────────────────────────────────────────
 

@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-// TODO: Replace mock responses with real BOCRA portal API calls:
-//  - SearchCustomer  → GET https://customerportal.bocra.org.bw/api/customers/search?q={query}
-//  - GetLicenseDetails → GET https://customerportal.bocra.org.bw/api/licences/{licenceNumber}
-//  Authentication: Bearer token from session; pass as Authorization header.
-//  Map the portal's response shape to the types below before returning.
+import { getSupabaseAdmin } from '@/lib/supabase'
 
 export type SearchCategory = 'all' | 'licence' | 'certificate' | 'type-approval' | 'imei' | 'organization'
 
@@ -104,7 +99,15 @@ const MOCK_ORGANIZATIONS: OrganizationResult[] = [
 function matchesQuery(fields: string[], q: string): boolean {
   if (!q) return true
   const lower = q.toLowerCase()
-  return fields.some((f) => f.toLowerCase().includes(lower))
+  return fields.some((f) => String(f).toLowerCase().includes(lower))
+}
+
+function mapLicenceStatus(code: string): LicenceResult['status'] {
+  const map: Record<string, LicenceResult['status']> = {
+    ACTIVE: 'Active', EXPIRED: 'Expired', SUSPENDED: 'Suspended',
+    CANCELLED: 'Expired', PENDING: 'Pending',
+  }
+  return map[code?.toUpperCase()] ?? 'Active'
 }
 
 export async function GET(request: NextRequest) {
@@ -112,33 +115,140 @@ export async function GET(request: NextRequest) {
   const q = (searchParams.get('q') ?? '').trim()
   const category = (searchParams.get('category') ?? 'all') as SearchCategory
 
-  // Simulate slight network latency in development
-  await new Promise((r) => setTimeout(r, 250))
+  const supabase = getSupabaseAdmin()
 
-  const licences =
-    category === 'all' || category === 'licence'
-      ? MOCK_LICENCES.filter((r) => matchesQuery([r.clientName, r.licenceNumber, r.licenceType], q))
-      : []
+  // ── Licences (Supabase licensing schema) ────────────────────────────────────
+  let licences: LicenceResult[] = []
+  if (category === 'all' || category === 'licence') {
+    if (supabase) {
+      try {
+        let query = supabase
+          .schema('licensing')
+          .from('licenses')
+          .select('id, license_number, license_type, holder_name, status_code, expiry_date')
+          .limit(50)
+        if (q) query = query.or(
+          `license_number.ilike.%${q}%,license_type.ilike.%${q}%,holder_name.ilike.%${q}%`
+        )
+        const { data, error } = await query
+        if (!error && data?.length) {
+          licences = data.map((r) => ({
+            id:            r.id,
+            clientName:    r.holder_name ?? '—',
+            licenceNumber: r.license_number,
+            licenceType:   r.license_type ?? '—',
+            status:        mapLicenceStatus(r.status_code),
+            expiryDate:    r.expiry_date?.slice(0, 10) ?? '',
+          }))
+        } else {
+          licences = MOCK_LICENCES.filter((r) => matchesQuery([r.clientName, r.licenceNumber, r.licenceType], q))
+        }
+      } catch {
+        licences = MOCK_LICENCES.filter((r) => matchesQuery([r.clientName, r.licenceNumber, r.licenceType], q))
+      }
+    } else {
+      licences = MOCK_LICENCES.filter((r) => matchesQuery([r.clientName, r.licenceNumber, r.licenceType], q))
+    }
+  }
 
-  const certificates =
-    category === 'all' || category === 'certificate'
-      ? MOCK_CERTIFICATES.filter((r) => matchesQuery([r.certificateNumber, r.type], q))
-      : []
+  const certificates: CertificateResult[] = []
 
-  const typeApprovals =
-    category === 'all' || category === 'type-approval'
-      ? MOCK_TYPE_APPROVALS.filter((r) => matchesQuery([r.brand, r.model, r.device], q))
-      : []
+  // ── Type approvals (docs.certificates + device.catalog) ─────────────────────
+  let typeApprovals: TypeApprovalResult[] = []
+  if (category === 'all' || category === 'type-approval') {
+    if (supabase) {
+      try {
+        let certQ = supabase
+          .schema('docs')
+          .from('certificates')
+          .select('id, certificate_number, holder_name, device_name, issue_date, status_code')
+          .eq('certificate_type', 'TYPE_APPROVAL')
+          .limit(50)
+        if (q) certQ = certQ.or(
+          `certificate_number.ilike.%${q}%,holder_name.ilike.%${q}%,device_name.ilike.%${q}%`
+        )
+        const { data: certs, error } = await certQ
+        if (!error && certs?.length) {
+          // Enrich with device catalog
+          const { data: records } = await supabase
+            .schema('device')
+            .from('type_approval_records')
+            .select('certificate_id, device_model_id')
+            .in('certificate_id', certs.map((c: { id: string }) => c.id))
+          const modelIds = [...new Set((records ?? []).map((r: { device_model_id: string }) => r.device_model_id).filter(Boolean))]
+          let devMap: Record<string, { brand_name: string; marketing_name: string; model_name: string }> = {}
+          if (modelIds.length) {
+            const { data: devices } = await supabase
+              .schema('device')
+              .from('catalog')
+              .select('id, brand_name, marketing_name, model_name')
+              .in('id', modelIds)
+            devMap = Object.fromEntries((devices ?? []).map((d: { id: string; brand_name: string; marketing_name: string; model_name: string }) => [d.id, d]))
+          }
+          const recByCert = Object.fromEntries(
+            (records ?? []).map((r: { certificate_id: string; device_model_id: string }) => [r.certificate_id, r.device_model_id])
+          )
+          typeApprovals = certs.map((c: { id: string; certificate_number: string; device_name: string; issue_date: string; status_code: string }) => {
+            const dev = devMap[recByCert[c.id]]
+            const nameParts = (c.device_name ?? '').split(' ')
+            return {
+              id:           c.id,
+              device:       dev?.marketing_name ?? c.device_name ?? '—',
+              brand:        dev?.brand_name     ?? nameParts[0] ?? '—',
+              model:        dev?.model_name     ?? (nameParts.slice(1).join(' ') || '—'),
+              approvalDate: c.issue_date?.slice(0, 10) ?? '',
+              status:       mapTAStatus(c.status_code),
+            }
+          })
+        } else {
+          typeApprovals = MOCK_TYPE_APPROVALS.filter((r) => matchesQuery([r.brand, r.model, r.device], q))
+        }
+      } catch {
+        typeApprovals = MOCK_TYPE_APPROVALS.filter((r) => matchesQuery([r.brand, r.model, r.device], q))
+      }
+    } else {
+      typeApprovals = MOCK_TYPE_APPROVALS.filter((r) => matchesQuery([r.brand, r.model, r.device], q))
+    }
+  }
 
+  // ── IMEI / devices (mock only — no dedicated schema yet) ────────────────────
   const devices =
     category === 'all' || category === 'imei'
       ? MOCK_DEVICES.filter((r) => matchesQuery([r.imei, r.brand, r.model], q))
       : []
 
-  const organizations =
-    category === 'all' || category === 'organization'
-      ? MOCK_ORGANIZATIONS.filter((r) => matchesQuery([r.name, r.registrationNumber, r.type], q))
-      : []
+  // ── Organisations (iam.organizations) ───────────────────────────────────────
+  let organizations: OrganizationResult[] = []
+  if (category === 'all' || category === 'organization') {
+    if (supabase) {
+      try {
+        let orgQ = supabase
+          .schema('iam')
+          .from('organizations')
+          .select('id, legal_name, trading_name, org_type_code, registration_number, status_code')
+          .limit(50)
+        if (q) orgQ = orgQ.or(
+          `legal_name.ilike.%${q}%,trading_name.ilike.%${q}%,registration_number.ilike.%${q}%`
+        )
+        const { data: orgs, error } = await orgQ
+        if (!error && orgs?.length) {
+          organizations = orgs.map((o: { id: string; legal_name: string; trading_name: string | null; org_type_code: string | null; registration_number: string | null; status_code: string }) => ({
+            id:                 o.id,
+            name:               o.legal_name,
+            registrationNumber: o.registration_number ?? '—',
+            type:               o.org_type_code ?? '—',
+            status:             mapOrgStatus(o.status_code),
+          }))
+        } else {
+          organizations = MOCK_ORGANIZATIONS.filter((r) => matchesQuery([r.name, r.registrationNumber, r.type], q))
+        }
+      } catch {
+        organizations = MOCK_ORGANIZATIONS.filter((r) => matchesQuery([r.name, r.registrationNumber, r.type], q))
+      }
+    } else {
+      organizations = MOCK_ORGANIZATIONS.filter((r) => matchesQuery([r.name, r.registrationNumber, r.type], q))
+    }
+  }
 
   const totalResults =
     licences.length + certificates.length + typeApprovals.length + devices.length + organizations.length

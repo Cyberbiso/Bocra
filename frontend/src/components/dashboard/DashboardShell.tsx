@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
@@ -12,10 +12,25 @@ import {
   SheetContent,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { useAppDispatch } from '@/lib/store/hooks'
+import { fetchMe } from '@/lib/store/slices/authSlice'
+import { setRole } from '@/lib/store/slices/roleSlice'
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const dispatch = useAppDispatch()
+
+  useEffect(() => {
+    dispatch(fetchMe()).then((action) => {
+      if (fetchMe.fulfilled.match(action)) {
+        const role = action.payload.role
+        if (role === 'officer' || role === 'admin' || role === 'applicant') {
+          dispatch(setRole(role))
+        }
+      }
+    })
+  }, [dispatch])
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-50">

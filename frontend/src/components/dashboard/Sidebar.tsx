@@ -29,9 +29,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { useRoleStore, type DashboardRole } from '@/lib/stores/role-store'
 import { useAppSelector, useAppDispatch } from '@/lib/store/hooks'
 import { toggleDemo } from '@/lib/store/slices/demoSlice'
+import type { DashboardRole } from '@/lib/store/slices/roleSlice'
 
 // ─── Nav config ──────────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Global Search & Verify', icon: Search, href: '/dashboard/search' },
       { label: 'Complaints', icon: MessageSquareWarning, href: '/dashboard/complaints' },
-      // { label: 'Licensing & Spectrum', icon: FileText, href: '/dashboard/licensing' },
+      { label: 'Licensing & Spectrum', icon: FileText, href: '/dashboard/licensing' },
       { label: 'Type Approval', icon: ShieldCheck, href: '/dashboard/type-approval' },
       { label: 'Device Verification & IMEI', icon: Smartphone, href: '/dashboard/device-verification' },
       { label: 'Certificates & Registers', icon: Award, href: '/dashboard/certificates' },
@@ -107,8 +107,6 @@ const ROLE_CONFIG: Record<DashboardRole, { label: string; dot: string }> = {
   admin: { label: 'Admin', dot: 'bg-rose-400' },
 }
 
-const SWITCHER_ROLES: DashboardRole[] = ['applicant', 'officer', 'admin']
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 interface SidebarProps {
@@ -119,7 +117,7 @@ interface SidebarProps {
 
 export default function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) {
   const pathname = usePathname()
-  const { role, setRole } = useRoleStore()
+  const role = useAppSelector((s) => s.role.role)
   const isDemo = useAppSelector((s) => s.demo.isDemo)
   const dispatch = useAppDispatch()
 
@@ -295,65 +293,21 @@ export default function Sidebar({ collapsed, onToggleCollapse, onClose }: Sideba
           </div>
         )}
 
-        {/* ── Sign Out Button ──────────────────────────────────────── */}
-        <div className="px-3 pb-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => void handleSignOut()}
-            className={cn(
-              'w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-              'border border-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
-            )}
-          >
-            <span>Sign out</span>
-          </button>
-        </div>
-
-        {/* ── Role Switcher Footer ──────────────────────────────────────── */}
+        {/* ── Role indicator ────────────────────────────────────────────── */}
         <div className={cn('p-3 shrink-0', collapsed && 'flex justify-center')}>
           {collapsed ? (
-            // In collapsed mode show a coloured dot with tooltip; TooltipTrigger
-            // renders a <button> wrapper here (no anchor inside, so valid HTML)
             <Tooltip>
               <TooltipTrigger className="cursor-default rounded-full outline-none">
-                <div
-                  className={cn(
-                    'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold',
-                    ROLE_CONFIG[role].dot
-                  )}
-                >
+                <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold', ROLE_CONFIG[role].dot)}>
                   {ROLE_CONFIG[role].label[0]}
                 </div>
               </TooltipTrigger>
-              <TooltipContent side="right">
-                Role: {ROLE_CONFIG[role].label}
-              </TooltipContent>
+              <TooltipContent side="right">Role: {ROLE_CONFIG[role].label}</TooltipContent>
             </Tooltip>
           ) : (
-            <div>
-              <p className="text-[10px] font-semibold tracking-widest text-white/40 uppercase mb-2">
-                View As
-              </p>
-              <div className="flex gap-1.5">
-                {SWITCHER_ROLES.map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setRole(r)}
-                    aria-pressed={role === r ? "true" : "false"}
-                    className={cn(
-                      'flex-1 py-1.5 px-1 text-[11px] font-medium rounded-md transition-all capitalize',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-                      role === r
-                        ? 'bg-white text-[#003580] shadow-sm'
-                        : 'bg-white/10 text-white/65 hover:bg-white/20 hover:text-white'
-                    )}
-                  >
-                    {ROLE_CONFIG[r].label}
-                  </button>
-                ))}
-              </div>
+            <div className="flex items-center gap-2 px-1">
+              <span className={cn('w-2 h-2 rounded-full shrink-0', ROLE_CONFIG[role].dot)} />
+              <span className="text-xs text-white/50">{ROLE_CONFIG[role].label}</span>
             </div>
           )}
         </div>

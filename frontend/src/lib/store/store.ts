@@ -15,6 +15,10 @@ import roleReducer from './slices/roleSlice'
 import demoReducer from './slices/demoSlice'
 import notificationsReducer from './slices/notificationsSlice'
 import agentReducer from './slices/agentSlice'
+import complaintsReducer from './slices/complaintsSlice'
+import typeApprovalReducer from './slices/typeApprovalSlice'
+import authReducer from './slices/authSlice'
+import organisationsReducer from './slices/organisationsSlice'
 
 const persistConfig = {
   key: 'bocra-root',
@@ -27,6 +31,10 @@ const rootReducer = combineReducers({
   demo: demoReducer,
   notifications: notificationsReducer,
   agent: agentReducer,
+  complaints: complaintsReducer,   // not persisted — always fetched fresh
+  typeApproval: typeApprovalReducer, // not persisted — always fetched fresh
+  auth: authReducer,               // not persisted — reloaded from session cookie
+  organisations: organisationsReducer, // not persisted — always fetched fresh
 })
 
 const persistedReducer = persistReducer(persistConfig, rootReducer)

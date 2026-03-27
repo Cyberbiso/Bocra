@@ -16,7 +16,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useAppSelector } from '@/lib/store/hooks'
-import { useRoleStore } from '@/lib/stores/role-store'
 import logoImage from './../../../public/logo.png'
 
 interface TopbarProps {
@@ -31,12 +30,19 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function Topbar({ onMobileMenuOpen }: TopbarProps) {
   const unreadCount = useAppSelector((s) => s.notifications.unreadCount)
-  const { role } = useRoleStore()
+  const authUser = useAppSelector((s) => s.auth.user)
+  const role = useAppSelector((s) => s.role.role)
   const { toggle: toggleChat } = useChatStore()
   const router = useRouter()
   const [query, setQuery] = useState('')
 
   const roleLabel = ROLE_LABELS[role] ?? role
+  const displayName = authUser
+    ? `${authUser.firstName} ${authUser.lastName}`
+    : 'BOCRA User'
+  const initials = authUser
+    ? `${authUser.firstName[0]}${authUser.lastName[0]}`.toUpperCase()
+    : role[0].toUpperCase()
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
@@ -149,19 +155,19 @@ export default function Topbar({ onMobileMenuOpen }: TopbarProps) {
           >
             <Avatar className="w-8 h-8">
               <AvatarFallback className="bg-[#003580] text-white text-xs font-bold">
-                {role[0].toUpperCase()}
+                {initials}
               </AvatarFallback>
             </Avatar>
             <span className="hidden md:block text-sm font-medium text-gray-700 leading-tight">
-              {roleLabel}
+              {displayName}
             </span>
           </DropdownMenuTrigger>
 
           <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuLabel>
-              <span className="block font-semibold text-gray-900">BOCRA User</span>
+              <span className="block font-semibold text-gray-900">{displayName}</span>
               <span className="block text-xs font-normal text-gray-500 mt-0.5">
-                {roleLabel}
+                {authUser?.orgName ?? roleLabel}
               </span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />

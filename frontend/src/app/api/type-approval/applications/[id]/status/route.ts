@@ -1,16 +1,7 @@
 import { NextResponse } from 'next/server'
+import { getSupabaseAdmin } from '@/lib/supabase'
 
-// TODO: Replace with real queries:
-// PATCH — UPDATE workflow.applications
-//   SET  current_status_code = :status,
-//        current_stage_code  = :stage,
-//        updated_at          = NOW(),
-//        decided_at          = CASE WHEN :status = 'APPROVED' THEN NOW() ELSE decided_at END
-//   WHERE id = :id
-// INSERT INTO workflow.application_decisions (application_id, officer_id, status_code, stage_code, remarks, decided_at)
-//   VALUES (:id, :officerId, :status, :stage, :remarks, NOW())
-// If status = 'APPROVED':
-//   INSERT INTO docs.certificates (...) VALUES (...)
+export const runtime = 'nodejs'
 
 export async function PATCH(
   request: Request,
@@ -19,11 +10,25 @@ export async function PATCH(
   const { id } = await params
   const body = await request.json().catch(() => null)
 
-  return NextResponse.json({
-    success: true,
-    applicationId: id,
-    status: body?.status ?? null,
-    stage: body?.stage ?? null,
-    remarks: body?.remarks ?? null,
-  })
+  const supabase = getSupabaseAdmin()
+  if (supabase && body?.status) {
+    const update: Record<string, unknown> = {
+      current_status_code: body.status,
+      updated_at: new Date().toISOString(),
+    }
+    if (body.stage) update.current_stage_code = body.stage
+    if (body.status === 'APPROVED') update.decided_at = new Date().toISOString()
+
+    const { error } = await supabase
+      .schema('workflow')
+      .from('applications')
+      .update(update)
+      .eq('id', id)
+
+    if (error) {
+      return NextResponse.json({ error: 'Could not update application status.' }, { status: 502 })
+    }
+  }
+
+  return NextResponse.json({ success: true, applicationId: id, status: body?.status, stage: body?.stage, remarks: body?.remarks })
 }

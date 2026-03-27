@@ -18,7 +18,7 @@ import {
   Tag,
   PhoneCall,
 } from 'lucide-react'
-import { useRoleStore } from '@/lib/stores/role-store'
+import { useAppSelector } from '@/lib/store/hooks'
 import { cn } from '@/lib/utils'
 import type { ComplaintStatus } from '@/app/api/complaints/route'
 
@@ -571,7 +571,7 @@ export default function ComplaintDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  const { role } = useRoleStore()
+  const role = useAppSelector((s) => s.role.role)
   const isOfficer = role === 'officer' || role === 'admin'
 
   // TODO: Replace with useQuery → GET /api/complaints/${id}

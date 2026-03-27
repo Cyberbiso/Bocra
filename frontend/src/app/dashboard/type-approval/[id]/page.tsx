@@ -33,7 +33,7 @@ import {
   Award,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useRoleStore } from '@/lib/stores/role-store'
+import { useAppSelector } from '@/lib/store/hooks'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -303,7 +303,7 @@ export default function TypeApprovalDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  const { role } = useRoleStore()
+  const role = useAppSelector((s) => s.role.role)
   const isStaff = role === 'officer' || role === 'admin'
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null)
 

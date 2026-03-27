@@ -1,6 +1,9 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import type { Role } from '@/lib/types/roles'
 
+// Re-export so consumers can import DashboardRole from here instead of role-store
+export type { Role as DashboardRole }
+
 interface RoleState {
   role: Role
 }

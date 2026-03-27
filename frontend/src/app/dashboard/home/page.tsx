@@ -26,7 +26,7 @@ import {
   CardFooter,
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { useRoleStore } from '@/lib/stores/role-store'
+import { useAppSelector } from '@/lib/store/hooks'
 import { cn } from '@/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -262,7 +262,7 @@ function StatCard({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardHomePage() {
-  const { role } = useRoleStore()
+  const role = useAppSelector((s) => s.role.role)
 
   const summary = SUMMARY_DATA[role]
 
@@ -318,7 +318,7 @@ export default function DashboardHomePage() {
             accent
           />
           <QuickActionButton
-            href="/dashboard/device-verification"
+            href="/dashboard/licensing"
             icon={ShieldCheck}
             label="Verify a Licence"
           />

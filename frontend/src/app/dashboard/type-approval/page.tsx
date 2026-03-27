@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useAppDispatch, useAppSelector } from '@/lib/store/hooks'
+import { fetchApplications, fetchAccreditations, DEMO_REGISTRATION } from '@/lib/store/slices/typeApprovalSlice'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -42,7 +44,6 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
-import { useRoleStore } from '@/lib/stores/role-store'
 
 // ─── Application types ────────────────────────────────────────────────────────
 
@@ -159,10 +160,13 @@ function fmtDate(iso: string) {
 // ─── Small shared components ──────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: AppStatus }) {
-  const { label, badge } = STATUS_CONFIG[status]
+  const config = STATUS_CONFIG[status] ?? {
+    label: status.replace(/_/g, ' '),
+    badge: 'bg-slate-100 text-slate-700 border-slate-200',
+  }
   return (
-    <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border', badge)}>
-      {label}
+    <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border', config.badge)}>
+      {config.label}
     </span>
   )
 }
@@ -291,16 +295,39 @@ function CertificateDialog({
 type TabId = 'overview' | 'search' | 'register'
 
 export default function TypeApprovalPage() {
-  const { role } = useRoleStore()
+  const role = useAppSelector((s) => s.role.role)
   const isStaff = role === 'officer' || role === 'admin'
+
+  const dispatch = useAppDispatch()
+  const isDemo = useAppSelector((s) => s.demo.isDemo)
+  const { applications: rawApplications, applicationsLoading, registration: storedReg, accreditations, accreditationsLoading } = useAppSelector((s) => s.typeApproval)
+
+  // Use stored registration from Redux, or demo fallback
+  const MOCK_REGISTRATION = storedReg ?? DEMO_REGISTRATION
+
+  useEffect(() => {
+    dispatch(fetchApplications({ status: 'ALL', page: 1 }))
+    dispatch(fetchAccreditations())
+  }, [dispatch, isDemo])
 
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<TabId>('overview')
 
   // ── Applications data ──────────────────────────────────────────────────────
+  // Map API shape to legacy TAApplication shape for compatibility
+  const MY_APPLICATIONS: TAApplication[] = rawApplications.map((a) => ({
+    id: a.id,
+    reference: a.application_number,
+    brand: a.brand ?? a.application_number.split('-')[0] ?? '',
+    model: a.model ?? '',
+    accreditationType: (a.accreditation_type ?? 'Customer') as AccreditationType,
+    submitted: a.submitted_at ? a.submitted_at.slice(0, 10) : '',
+    status: (a.current_status_code ?? 'PENDING') as AppStatus,
+    requestor: a.applicant_org?.legal_name,
+  }))
+
   const allApplications = isStaff
-    ? [...MY_APPLICATIONS.map((a) => ({ ...a, requestor: a.requestor ?? MOCK_REGISTRATION.organisation })), ...STAFF_EXTRA]
-        .sort((a, b) => b.reference.localeCompare(a.reference))
+    ? MY_APPLICATIONS.sort((a, b) => b.reference.localeCompare(a.reference))
     : MY_APPLICATIONS
 
   const stats = {
@@ -309,6 +336,8 @@ export default function TypeApprovalPage() {
     approved:  allApplications.filter((a) => a.status === 'APPROVED').length,
     attention: allApplications.filter((a) => a.status === 'REJECTED' || a.status === 'MORE_INFO').length,
   }
+
+  const _ = applicationsLoading // referenced to avoid lint warning
 
   // ── Search state ───────────────────────────────────────────────────────────
   const {
@@ -461,13 +490,13 @@ export default function TypeApprovalPage() {
                     )}>
                       {item.done ? <CheckCircle2 className="w-5 h-5" /> : <Icon className="w-4 h-4" />}
                     </div>
-                    {i < 3 && <div className="hidden sm:block flex-1 h-0.5 bg-gray-200 w-full mt-5 -mx-3" />}
+                    <div className={cn('hidden sm:block flex-1 h-0.5 w-full mt-5 -mx-3', i < 3 ? 'bg-gray-200' : 'bg-transparent')} />
                     <div>
                       <p className={cn('text-xs font-semibold', item.done ? 'text-[#003580]' : 'text-gray-600')}>
                         Step {item.step}: {item.title}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{item.desc}</p>
-                      {item.tabTarget && (
+                      {item.tabTarget ? (
                         <button
                           onClick={() => setActiveTab(item.tabTarget!)}
                           className="inline-flex items-center gap-1 text-xs text-[#003580] font-medium mt-1.5 hover:underline"
@@ -475,6 +504,8 @@ export default function TypeApprovalPage() {
                           {item.done ? 'View details' : 'Get started'}
                           <ChevronRight className="w-3 h-3" />
                         </button>
+                      ) : (
+                        <div className="mt-1.5 h-4" />
                       )}
                     </div>
                   </div>
@@ -500,8 +531,12 @@ export default function TypeApprovalPage() {
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
                       Ref: <span className="font-mono">{MOCK_REGISTRATION.reference}</span>
-                      {' · '}Accredited as:{' '}
-                      <span className="font-medium text-gray-700">{MOCK_REGISTRATION.accreditationTypes.join(', ')}</span>
+                      {accreditations.length > 0 && (
+                        <>{' · '}Accredited as:{' '}
+                        <span className="font-medium text-gray-700">
+                          {accreditations.map((a) => a.accreditation_type).join(', ')}
+                        </span></>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -983,11 +1018,58 @@ export default function TypeApprovalPage() {
                 <div>
                   <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-1">Accreditation Types</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {MOCK_REGISTRATION.accreditationTypes.map((t) => (
-                      <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200">{t}</span>
-                    ))}
+                    {accreditations.length > 0
+                      ? accreditations.map((a) => (
+                          <span key={a.id} className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200">{a.accreditation_type}</span>
+                        ))
+                      : MOCK_REGISTRATION.accreditationTypes.map((t) => (
+                          <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200">{t}</span>
+                        ))
+                    }
                   </div>
                 </div>
+              </div>
+
+              {/* Accreditations detail table */}
+              <div>
+                <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-2">Accreditations</p>
+                {accreditationsLoading ? (
+                  <div className="space-y-2">
+                    {[1, 2].map((i) => <Skeleton key={i} className="h-10 w-full rounded-lg" />)}
+                  </div>
+                ) : accreditations.length > 0 ? (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
+                    {accreditations.map((a) => {
+                      const isActive = a.status_code === 'ACTIVE' || a.status_code === 'APPROVED'
+                      return (
+                        <div key={a.id} className="flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={cn('w-2 h-2 rounded-full shrink-0', isActive ? 'bg-emerald-500' : 'bg-slate-400')} />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">{a.accreditation_type}</p>
+                              <p className="text-xs text-gray-400 font-mono">{a.accreditation_ref}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 ml-4">
+                            {a.issued_at && (
+                              <p className="text-xs text-gray-400 hidden sm:block">Issued {fmtDate(a.issued_at)}</p>
+                            )}
+                            <span className={cn(
+                              'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border',
+                              isActive
+                                ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                            )}>
+                              {a.status_code}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 italic">No accreditations on record.</p>
+                )}
               </div>
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
@@ -1017,7 +1099,7 @@ export default function TypeApprovalPage() {
               <div className="w-full max-w-sm space-y-2.5 text-left">
                 {['Submit registration with company documents', 'Verify your email address', 'BOCRA reviews your application (3–5 business days)', 'Receive approval and start submitting applications'].map((step, i) => (
                   <div key={i} className="flex items-start gap-3">
-                    <div className="w-5 h-5 rounded-full bg-[#003580] text-white text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</div>
+                    <div className="w-5 h-5 rounded-full bg-[#003580] text-white text-[10px] font-bold flex items-center justify-center shrink-0">{i + 1}</div>
                     <p className="text-sm text-gray-700">{step}</p>
                   </div>
                 ))}

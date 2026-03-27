@@ -2,7 +2,6 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
-import { useDemoAwareQuery } from '@/lib/demo/useDemoAwareQuery'
 import { DEMO_COMPLAINTS_RESPONSE } from '@/lib/demo/seed-data'
 import {
   Eye,
@@ -26,13 +25,17 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { useRoleStore } from '@/lib/stores/role-store'
+import { useAppSelector, useAppDispatch } from '@/lib/store/hooks'
+import {
+  fetchComplaints,
+  patchComplaintStatus,
+  setStatusOverride,
+} from '@/lib/store/slices/complaintsSlice'
 import { cn } from '@/lib/utils'
 import ComplaintDialog from '@/components/dashboard/complaints/ComplaintDialog'
 import type {
   ComplaintStatus,
   Complaint,
-  ComplaintsResponse,
 } from '@/app/api/complaints/route'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -517,8 +520,14 @@ function FilterBar({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ComplaintsPage() {
-  const { role } = useRoleStore()
+  const role = useAppSelector((s) => s.role.role)
   const isOfficer = role === 'officer' || role === 'admin'
+
+  const dispatch = useAppDispatch()
+  const isDemo = useAppSelector((s) => s.demo.isDemo)
+  const { items: rawComplaints, meta, loading, statusOverrides } = useAppSelector(
+    (s) => s.complaints,
+  )
 
   // Filter state
   const [status, setStatus] = useState<string>('ALL')
@@ -528,8 +537,7 @@ export default function ComplaintsPage() {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
 
-  // Officer status changes (optimistic)
-  const [statusOverrides, setStatusOverrides] = useState<Record<string, ComplaintStatus>>({})
+  // Dialog state for status changes
   const [statusTarget, setStatusTarget] = useState<Complaint | null>(null)
 
   // Reset to page 1 whenever a filter changes
@@ -538,27 +546,23 @@ export default function ComplaintsPage() {
     setPage(1)
   }
 
-  // TODO: Replace with real API — GET /api/complaints (with userId from session for non-officer)
-  const { data, isLoading } = useDemoAwareQuery<ComplaintsResponse>({
-    queryKey: ['complaints', role, status, operator, dateFrom, dateTo, page],
-    fetchFn: async () => {
-      const params = new URLSearchParams({
+  // Fetch on mount and whenever filters / page change
+  useEffect(() => {
+    dispatch(
+      fetchComplaints({
         role,
-        userId: 'user_001', // TODO: replace with session user ID
         status,
         operator,
         dateFrom,
         dateTo,
-        page: String(page),
-      })
-      const res = await fetch(`/api/complaints?${params}`)
-      if (!res.ok) throw new Error('Failed to fetch complaints')
-      return res.json()
-    },
-    demoFallback: DEMO_COMPLAINTS_RESPONSE,
-  })
+        page,
+        isDemo,
+        demoFallback: DEMO_COMPLAINTS_RESPONSE,
+      }),
+    )
+  }, [dispatch, role, status, operator, dateFrom, dateTo, page, isDemo])
 
-  const rawComplaints = data?.data ?? []
+  // Client-side search filter (on top of server-filtered results)
   const complaints = useMemo(() => {
     if (!query.trim()) return rawComplaints
     const q = query.toLowerCase()
@@ -569,9 +573,16 @@ export default function ComplaintsPage() {
         c.operator.toLowerCase().includes(q),
     )
   }, [rawComplaints, query])
-  const meta = data?.meta
-  const isFetching = false
-  const loading = isLoading || isFetching
+
+  // Merge optimistic status overrides onto displayed rows
+  const displayComplaints = useMemo(
+    () =>
+      complaints.map((c) =>
+        statusOverrides[c.id] ? { ...c, status: statusOverrides[c.id] } : c,
+      ),
+    [complaints, statusOverrides],
+  )
+
   const colCount = isOfficer ? 8 : 7
 
   return (
@@ -580,7 +591,7 @@ export default function ComplaintsPage() {
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Complaints & Enquiries</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Complaints &amp; Enquiries</h1>
           <p className="text-sm text-gray-500 mt-1">
             {isOfficer
               ? 'All submitted complaints across all users.'
@@ -605,12 +616,7 @@ export default function ComplaintsPage() {
       />
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
-      <div
-        className={cn(
-          'rounded-xl border border-gray-200 overflow-hidden bg-white transition-opacity duration-200',
-          isFetching && !isLoading && 'opacity-70'
-        )}
-      >
+      <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -629,22 +635,17 @@ export default function ComplaintsPage() {
             <tbody>
               {loading ? (
                 <SkeletonRows cols={colCount} />
-              ) : complaints.length === 0 ? (
+              ) : displayComplaints.length === 0 ? (
                 <EmptyState />
               ) : (
-                complaints.map((c: Complaint) => {
-                  const merged = statusOverrides[c.id]
-                    ? { ...c, status: statusOverrides[c.id] }
-                    : c
-                  return (
-                    <ComplaintRow
-                      key={c.id}
-                      complaint={merged}
-                      isOfficer={isOfficer}
-                      onChangeStatus={isOfficer ? () => setStatusTarget(merged) : undefined}
-                    />
-                  )
-                })
+                displayComplaints.map((c: Complaint) => (
+                  <ComplaintRow
+                    key={c.id}
+                    complaint={c}
+                    isOfficer={isOfficer}
+                    onChangeStatus={isOfficer ? () => setStatusTarget(c) : undefined}
+                  />
+                ))
               )}
             </tbody>
           </table>
@@ -667,7 +668,10 @@ export default function ComplaintsPage() {
         complaint={statusTarget}
         onClose={() => setStatusTarget(null)}
         onChanged={(id, newStatus) => {
-          setStatusOverrides(prev => ({ ...prev, [id]: newStatus }))
+          // Optimistic update in Redux store
+          dispatch(setStatusOverride({ id, status: newStatus }))
+          // Fire PATCH to backend
+          dispatch(patchComplaintStatus({ id, status: newStatus }))
           setStatusTarget(null)
         }}
       />

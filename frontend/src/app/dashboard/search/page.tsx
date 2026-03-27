@@ -51,13 +51,12 @@ async function fetchSearch(q: string, category: SearchCategory): Promise<SearchR
 const CATEGORIES: { value: SearchCategory; label: string; plural: string }[] = [
   { value: 'all', label: 'All', plural: 'All Results' },
   { value: 'licence', label: 'Licence', plural: 'Licences' },
-  { value: 'certificate', label: 'Certificate', plural: 'Certificates' },
   { value: 'type-approval', label: 'Type Approval', plural: 'Type Approvals' },
   { value: 'imei', label: 'IMEI / Device', plural: 'IMEI / Devices' },
   { value: 'organization', label: 'Organization', plural: 'Organizations' },
 ]
 
-const TAB_VALUES = ['licence', 'certificate', 'type-approval', 'imei', 'organization'] as const
+const TAB_VALUES = ['licence', 'type-approval', 'imei', 'organization'] as const
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
@@ -403,7 +402,6 @@ export default function GlobalSearchPage() {
 
   const counts = {
     licence: data?.licences.length ?? 0,
-    certificate: data?.certificates.length ?? 0,
     'type-approval': data?.typeApprovals.length ?? 0,
     imei: data?.devices.length ?? 0,
     organization: data?.organizations.length ?? 0,
@@ -423,7 +421,7 @@ export default function GlobalSearchPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Global Search & Verification</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Search licences, certificates, type approvals, IMEI records, and registered organisations.
+          Search licences, type approvals, IMEI records, and registered organisations.
         </p>
       </div>
 
@@ -451,7 +449,7 @@ export default function GlobalSearchPage() {
             type="search"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Search by licence number, IMEI, certificate number, organisation name…"
+            placeholder="Search by licence number, IMEI, device model, organisation name…"
             className="w-full h-11 pl-10 pr-4 rounded-lg border border-gray-200 bg-white text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#003580]/25 focus:border-[#003580]/40 transition-colors"
           />
           {/* Live fetch indicator */}
@@ -503,16 +501,6 @@ export default function GlobalSearchPage() {
             <EmptyState query={debouncedQuery} />
           ) : (
             <LicenceTable rows={data?.licences ?? []} loading={loading} />
-          )}
-        </TabsContent>
-
-        {/* ── Certificates ─────────────────────────────────────────────── */}
-        <TabsContent value="certificate" className="mt-4">
-          {/* TODO: GET /api/search?q=...&category=certificate */}
-          {!loading && counts.certificate === 0 ? (
-            <EmptyState query={debouncedQuery} />
-          ) : (
-            <CertificateTable rows={data?.certificates ?? []} loading={loading} />
           )}
         </TabsContent>
 

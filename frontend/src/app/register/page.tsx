@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useAppDispatch } from '@/lib/store/hooks'
+import { submitRegistration } from '@/lib/store/slices/typeApprovalSlice'
 import Image from 'next/image'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -480,6 +482,7 @@ function SuccessState({ orgName }: { orgName: string }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function RegisterPage() {
+  const dispatch = useAppDispatch()
   const [step, setStep] = useState(0)
   const [formData, setFormData] = useState<Partial<Step2Form>>({})
   const [submitted, setSubmitted] = useState(false)
@@ -488,8 +491,21 @@ export default function RegisterPage() {
     setFormData(data)
   }
 
-  function handleSubmit() {
-    // TODO: POST /api/register with formData
+  async function handleSubmit() {
+    await dispatch(submitRegistration({
+      orgName: formData.org_name,
+      contactFirstName: formData.first_name,
+      contactLastName: formData.last_name,
+      email: formData.email,
+      phone: formData.phone,
+      accountType: formData.account_type,
+      idType: formData.id_type,
+      idNumber: formData.id_number,
+      physicalAddress: formData.physical_address,
+      postalAddress: formData.postal_address,
+      city: formData.city,
+      country: formData.country,
+    }))
     setSubmitted(true)
   }
 

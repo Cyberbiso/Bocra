@@ -1,9 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { useDemoAwareQuery } from '@/lib/demo/useDemoAwareQuery'
-import { DEMO_LICENSING_DATA } from '@/lib/demo/seed-data'
 import {
   PlusCircle,
   Eye,
@@ -16,14 +14,34 @@ import {
   FileText,
   ChevronRight,
   Loader2,
+  ClipboardList,
+  ThumbsUp,
+  ThumbsDown,
+  MessageSquare,
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { useAppSelector } from '@/lib/store/hooks'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type LicenceStatus      = 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'SUSPENDED'
 type ApplicationStatus  = 'PENDING' | 'APPROVED' | 'UNDER_REVIEW' | 'REJECTED' | 'AWAITING_PAYMENT'
+
+interface ReviewApplication {
+  id: string
+  applicationNumber: string
+  licenceType: string
+  category: string
+  orgName: string
+  contactEmail: string
+  status: ApplicationStatus
+  submittedDate: string
+  lastUpdated: string
+  coverageArea?: string
+  technicalDetails?: string
+}
 
 interface Licence {
   id: string
@@ -50,117 +68,8 @@ interface LicensingData {
   applications: LicenceApplication[]
 }
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-
-// TODO: Replace with GET https://op-web.bocra.org.bw/api/licences?userId={id}
-// TODO: For officer role use GET https://op-web.bocra.org.bw/api/licences (no userId filter)
-// Fields map: licenceNumber → LICENCE_NUMBER, licenceType → SERVICE_TYPE, expiryDate → EXPIRY_DATE
-
 const TODAY = new Date()
 TODAY.setHours(0, 0, 0, 0)
-
-function addDays(date: Date, days: number): string {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-
-const MOCK_DATA: LicensingData = {
-  licences: [
-    {
-      id: 'l1',
-      licenceNumber: 'ECN-2019-0031',
-      licenceType: 'Electronic Communications Network',
-      category: 'Telecommunications',
-      status: 'ACTIVE',
-      issueDate: '2019-07-01',
-      expiryDate: addDays(TODAY, 8),   // ← expires in 8 days → RED alert
-    },
-    {
-      id: 'l2',
-      licenceNumber: 'ISP-2021-0012',
-      licenceType: 'Internet Service Provider',
-      category: 'Data Services',
-      status: 'ACTIVE',
-      issueDate: '2021-03-15',
-      expiryDate: addDays(TODAY, 42),  // ← expires in 42 days → AMBER alert
-    },
-    {
-      id: 'l3',
-      licenceNumber: 'VSAT-2022-0007',
-      licenceType: 'VSAT Terminal Licence',
-      category: 'Satellite Services',
-      status: 'SUSPENDED',
-      issueDate: '2022-06-20',
-      expiryDate: addDays(TODAY, 180),
-    },
-    {
-      id: 'l4',
-      licenceNumber: 'BRD-2018-0002',
-      licenceType: 'Broadcasting Licence — FM Radio',
-      category: 'Broadcasting',
-      status: 'EXPIRED',
-      issueDate: '2018-01-10',
-      expiryDate: addDays(TODAY, -45), // ← already expired
-    },
-    {
-      id: 'l5',
-      licenceNumber: 'ECS-2020-0044',
-      licenceType: 'Electronic Communications Service',
-      category: 'Telecommunications',
-      status: 'ACTIVE',
-      issueDate: '2020-09-01',
-      expiryDate: addDays(TODAY, 310),
-    },
-    {
-      id: 'l6',
-      licenceNumber: 'POS-2017-0003',
-      licenceType: 'Postal Operator Licence',
-      category: 'Postal Services',
-      status: 'CANCELLED',
-      issueDate: '2017-05-01',
-      expiryDate: addDays(TODAY, -200),
-    },
-  ],
-  applications: [
-    {
-      id: 'a1',
-      applicationNumber: 'APP-2025-00412',
-      type: 'Spectrum Authorisation',
-      category: 'Telecommunications',
-      status: 'UNDER_REVIEW',
-      submittedDate: '2025-03-01',
-      lastUpdated: '2025-03-19',
-    },
-    {
-      id: 'a2',
-      applicationNumber: 'APP-2025-00387',
-      type: 'Type Approval — Wireless Router',
-      category: 'Type Approval',
-      status: 'AWAITING_PAYMENT',
-      submittedDate: '2025-02-20',
-      lastUpdated: '2025-03-15',
-    },
-    {
-      id: 'a3',
-      applicationNumber: 'APP-2025-00291',
-      type: 'Electronic Communications Service — Amendment',
-      category: 'Telecommunications',
-      status: 'APPROVED',
-      submittedDate: '2025-01-10',
-      lastUpdated: '2025-03-10',
-    },
-    {
-      id: 'a4',
-      applicationNumber: 'APP-2024-01841',
-      type: 'Broadcasting Licence — TV',
-      category: 'Broadcasting',
-      status: 'REJECTED',
-      submittedDate: '2024-11-15',
-      lastUpdated: '2025-02-28',
-    },
-  ],
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -523,22 +432,281 @@ function StatChip({
   )
 }
 
+// ─── Approval Queue (officer / admin) ─────────────────────────────────────────
+
+const REVIEW_STATUS_STYLES: Record<string, { cls: string; icon: React.ElementType }> = {
+  PENDING:          { cls: 'bg-amber-50 text-amber-700 border-amber-200',     icon: Clock         },
+  UNDER_REVIEW:     { cls: 'bg-blue-50 text-blue-700 border-blue-200',        icon: FileText      },
+  AWAITING_PAYMENT: { cls: 'bg-purple-50 text-purple-700 border-purple-200',  icon: Clock         },
+  APPROVED:         { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+  REJECTED:         { cls: 'bg-red-50 text-red-700 border-red-200',           icon: XCircle       },
+}
+
+function ReviewStatusBadge({ status }: { status: string }) {
+  const cfg = REVIEW_STATUS_STYLES[status] ?? { cls: 'bg-gray-100 text-gray-600 border-gray-200', icon: Clock }
+  const Icon = cfg.icon
+  return (
+    <span className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold', cfg.cls)}>
+      <Icon className="w-3 h-3" />
+      {status.replace(/_/g, ' ')}
+    </span>
+  )
+}
+
+function ApprovalQueue() {
+  const [items,      setItems]      = useState<ReviewApplication[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [actioning,  setActioning]  = useState<string | null>(null)
+  const [noteModal,  setNoteModal]  = useState<{ id: string; action: 'APPROVED' | 'REJECTED' | 'UNDER_REVIEW' } | null>(null)
+  const [noteText,   setNoteText]   = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const qs = statusFilter ? `&status=${statusFilter}` : ''
+      const res  = await fetch(`/api/licensing?action=review${qs}`)
+      const json = await res.json()
+      setItems((json.data ?? []).map((r: Record<string, string>) => ({
+        id:               r.id,
+        applicationNumber: r.application_number,
+        licenceType:      r.license_type ?? '—',
+        category:         r.category ?? '—',
+        orgName:          r.org_name ?? '—',
+        contactEmail:     r.contact_email ?? '',
+        status:           (r.status_code ?? 'PENDING') as ApplicationStatus,
+        submittedDate:    r.submitted_date?.slice(0, 10) ?? '',
+        lastUpdated:      (r.updated_at ?? '')?.slice(0, 10),
+        coverageArea:     r.coverage_area ?? '',
+        technicalDetails: r.technical_details ?? '',
+      })))
+    } catch { /* keep empty */ }
+    finally { setLoading(false) }
+  }, [statusFilter])
+
+  useEffect(() => { load() }, [load])
+
+  async function applyAction(id: string, status_code: string, notes?: string) {
+    setActioning(id)
+    try {
+      await fetch('/api/licensing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'updateStatus', id, status_code, notes }),
+      })
+      await load()
+    } finally {
+      setActioning(null)
+      setNoteModal(null)
+      setNoteText('')
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
+        >
+          <option value="">All pending</option>
+          <option value="PENDING">Pending</option>
+          <option value="UNDER_REVIEW">Under Review</option>
+          <option value="AWAITING_PAYMENT">Awaiting Payment</option>
+          <option value="APPROVED">Approved</option>
+          <option value="REJECTED">Rejected</option>
+        </select>
+        <button
+          onClick={load}
+          className="flex items-center gap-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-2 hover:bg-gray-50 transition-colors"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          Refresh
+        </button>
+        {!loading && (
+          <span className="text-xs text-gray-400 ml-auto">{items.length} application{items.length !== 1 ? 's' : ''}</span>
+        )}
+      </div>
+
+      {/* Note / decision modal */}
+      {noteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-6 w-full max-w-md mx-4 space-y-4">
+            <h3 className="text-sm font-semibold text-gray-900">
+              {noteModal.action === 'APPROVED' ? 'Approve Application' :
+               noteModal.action === 'REJECTED' ? 'Reject Application' : 'Request More Information'}
+            </h3>
+            <textarea
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Add a note or reason (optional)…"
+              rows={4}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#003580]/20 resize-none"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setNoteModal(null); setNoteText('') }}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => applyAction(noteModal.id, noteModal.action, noteText || undefined)}
+                disabled={!!actioning}
+                className={cn(
+                  'px-4 py-2 text-sm font-semibold rounded-lg text-white transition-colors disabled:opacity-60',
+                  noteModal.action === 'APPROVED' ? 'bg-emerald-600 hover:bg-emerald-700' :
+                  noteModal.action === 'REJECTED' ? 'bg-red-600 hover:bg-red-700' :
+                  'bg-[#003580] hover:bg-[#002a6b]',
+                )}
+              >
+                {actioning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <Th>Application No.</Th>
+                <Th className="min-w-[200px]">Licence Type</Th>
+                <Th>Organisation</Th>
+                <Th>Category</Th>
+                <Th>Status</Th>
+                <Th>Submitted</Th>
+                <Th className="text-right">Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <SkeletonRows cols={7} />
+              ) : items.length === 0 ? (
+                <EmptyRow cols={7} message="No applications to review." />
+              ) : (
+                items.map((item) => (
+                  <tr key={item.id} className="hover:bg-gray-50/60 transition-colors">
+                    <Td>
+                      <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-700">
+                        {item.applicationNumber}
+                      </code>
+                    </Td>
+                    <Td className="text-gray-800 font-medium">
+                      <span className="line-clamp-2 leading-snug">{item.licenceType}</span>
+                    </Td>
+                    <Td>
+                      <div className="text-gray-800 text-xs font-medium leading-snug">{item.orgName}</div>
+                      {item.contactEmail && (
+                        <div className="text-gray-400 text-xs truncate max-w-[160px]">{item.contactEmail}</div>
+                      )}
+                    </Td>
+                    <Td>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{item.category}</span>
+                    </Td>
+                    <Td><ReviewStatusBadge status={item.status} /></Td>
+                    <Td className="text-gray-500 whitespace-nowrap">{item.submittedDate}</Td>
+                    <Td className="text-right">
+                      <div className="flex items-center justify-end gap-1.5 flex-nowrap">
+                        {(item.status === 'PENDING' || item.status === 'UNDER_REVIEW') && (
+                          <>
+                            <button
+                              onClick={() => setNoteModal({ id: item.id, action: 'APPROVED' })}
+                              disabled={!!actioning}
+                              title="Approve"
+                              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-md border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors disabled:opacity-40"
+                            >
+                              <ThumbsUp className="w-3 h-3" />
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => setNoteModal({ id: item.id, action: 'UNDER_REVIEW' })}
+                              disabled={!!actioning}
+                              title="Request more info"
+                              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors disabled:opacity-40"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              Query
+                            </button>
+                            <button
+                              onClick={() => setNoteModal({ id: item.id, action: 'REJECTED' })}
+                              disabled={!!actioning}
+                              title="Reject"
+                              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
+                            >
+                              <ThumbsDown className="w-3 h-3" />
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        <ActionBtn icon={Eye} label="View" href={`/dashboard/licensing/${item.id}`} variant="default" />
+                      </div>
+                    </Td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function LicensingPage() {
-  // TODO: Replace with useQuery → GET https://op-web.bocra.org.bw/api/licences?userId={id}
-  // TODO: Applications → GET https://op-web.bocra.org.bw/api/licence-applications?userId={id}
-  const { data, isLoading } = useDemoAwareQuery<LicensingData>({
-    queryKey: ['licensing'],
-    fetchFn: async () => {
-      await new Promise((r) => setTimeout(r, 300))
-      return MOCK_DATA
-    },
-    demoFallback: DEMO_LICENSING_DATA,
-  })
+  const role = useAppSelector((s) => s.role.role)
+  const isStaff = role === 'officer' || role === 'admin'
 
-  const licences     = data?.licences     ?? []
-  const applications = data?.applications ?? []
+  const [licences,     setLicences]     = useState<Licence[]>([])
+  const [applications, setApplications] = useState<LicenceApplication[]>([])
+  const [isLoading,    setIsLoading]    = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const [licRes, appRes] = await Promise.all([
+          fetch('/api/licensing?action=list'),
+          fetch('/api/licensing?action=applications'),
+        ])
+        const [licJson, appJson] = await Promise.all([licRes.json(), appRes.json()])
+        if (cancelled) return
+
+        setLicences((licJson.data ?? []).map((r: Record<string, string>) => ({
+          id:            r.id,
+          licenceNumber: r.license_number,
+          licenceType:   r.license_type,
+          category:      r.category ?? '—',
+          status:        (r.status_code ?? 'ACTIVE') as LicenceStatus,
+          issueDate:     r.issue_date?.slice(0, 10) ?? '',
+          expiryDate:    r.expiry_date?.slice(0, 10) ?? '',
+        })))
+
+        setApplications((appJson.data ?? []).map((r: Record<string, string>) => ({
+          id:                r.id,
+          applicationNumber: r.application_number,
+          type:              r.license_type ?? r.type ?? '—',
+          category:          r.category ?? '—',
+          status:            (r.status_code ?? 'PENDING') as ApplicationStatus,
+          submittedDate:     r.submitted_date?.slice(0, 10) ?? '',
+          lastUpdated:       (r.updated_at ?? r.last_updated ?? '')?.slice(0, 10),
+        })))
+      } catch (err) {
+        console.error('[licensing] load error:', err)
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
 
   // Derive summary counts
   const active    = licences.filter((l) => l.status === 'ACTIVE').length
@@ -554,7 +722,7 @@ export default function LicensingPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Licensing & Spectrum</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Manage your licences, track applications, and submit renewal requests.
+            Manage licences, track applications, and submit renewal requests.
           </p>
         </div>
         <Link
@@ -566,56 +734,79 @@ export default function LicensingPage() {
         </Link>
       </div>
 
-      {/* ── Summary chips ────────────────────────────────────────────────── */}
-      {!isLoading && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatChip
-            label="Active licences"
-            value={active}
-            cls="border-emerald-200 bg-emerald-50 text-emerald-800"
-          />
-          <StatChip
-            label="Expiring within 60 days"
-            value={expiring}
-            cls={expiring > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'}
-          />
-          <StatChip
-            label="Critical (≤ 14 days)"
-            value={critical}
-            cls={critical > 0 ? 'border-red-200 bg-red-50 text-red-800' : 'border-gray-200 bg-gray-50 text-gray-600'}
-          />
-          <StatChip
-            label="Applications in review"
-            value={pending}
-            cls="border-blue-200 bg-blue-50 text-blue-800"
-          />
-        </div>
-      )}
+      <Tabs defaultValue="licences">
+        <TabsList className="border-b border-gray-200 bg-transparent p-0 gap-0 h-auto rounded-none w-full justify-start">
+          <TabsTrigger
+            value="licences"
+            className="rounded-none h-10 px-5 text-sm border-b-2 border-transparent data-[state=active]:border-[#003580] data-[state=active]:text-[#003580] data-[state=active]:font-semibold bg-transparent focus-visible:outline-none"
+          >
+            <FileText className="w-3.5 h-3.5 mr-1.5" />
+            My Licences
+          </TabsTrigger>
+          <TabsTrigger
+            value="applications"
+            className="rounded-none h-10 px-5 text-sm border-b-2 border-transparent data-[state=active]:border-[#003580] data-[state=active]:text-[#003580] data-[state=active]:font-semibold bg-transparent focus-visible:outline-none"
+          >
+            <ClipboardList className="w-3.5 h-3.5 mr-1.5" />
+            My Applications
+          </TabsTrigger>
+          {isStaff && (
+            <TabsTrigger
+              value="approval"
+              className="rounded-none h-10 px-5 text-sm border-b-2 border-transparent data-[state=active]:border-[#003580] data-[state=active]:text-[#003580] data-[state=active]:font-semibold bg-transparent focus-visible:outline-none"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+              Licence Approvals
+            </TabsTrigger>
+          )}
+        </TabsList>
 
-      {/* ── Renewal alert banner ─────────────────────────────────────────── */}
-      {!isLoading && critical > 0 && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3.5">
-          <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-red-800">
-              {critical} licence{critical !== 1 ? 's' : ''} expiring within 14 days
-            </p>
-            <p className="text-xs text-red-700 mt-0.5">
-              Renew immediately to avoid service interruption and regulatory non-compliance.
-              Contact BOCRA on <strong>+267 395 7755</strong> if you need assistance.
-            </p>
-          </div>
-          <button className="ml-auto flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-900 shrink-0">
-            Renew now <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
+        {/* ── My Licences ──────────────────────────────────────────────── */}
+        <TabsContent value="licences" className="pt-5 space-y-5">
+          {/* Summary chips */}
+          {!isLoading && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <StatChip label="Active licences"        value={active}   cls="border-emerald-200 bg-emerald-50 text-emerald-800" />
+              <StatChip label="Expiring within 60 days" value={expiring} cls={expiring > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'} />
+              <StatChip label="Critical (≤ 14 days)"   value={critical} cls={critical > 0 ? 'border-red-200 bg-red-50 text-red-800' : 'border-gray-200 bg-gray-50 text-gray-600'} />
+              <StatChip label="Applications in review" value={pending}  cls="border-blue-200 bg-blue-50 text-blue-800" />
+            </div>
+          )}
 
-      {/* ── Licences table ───────────────────────────────────────────────── */}
-      <LicencesTable licences={licences} loading={isLoading} />
+          {/* Renewal alert */}
+          {!isLoading && critical > 0 && (
+            <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3.5">
+              <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-red-800">
+                  {critical} licence{critical !== 1 ? 's' : ''} expiring within 14 days
+                </p>
+                <p className="text-xs text-red-700 mt-0.5">
+                  Renew immediately to avoid service interruption and regulatory non-compliance.
+                  Contact BOCRA on <strong>+267 395 7755</strong> if you need assistance.
+                </p>
+              </div>
+              <button className="ml-auto flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-900 shrink-0">
+                Renew now <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
-      {/* ── Applications table ───────────────────────────────────────────── */}
-      <ApplicationsTable applications={applications} loading={isLoading} />
+          <LicencesTable licences={licences} loading={isLoading} />
+        </TabsContent>
+
+        {/* ── My Applications ───────────────────────────────────────────── */}
+        <TabsContent value="applications" className="pt-5">
+          <ApplicationsTable applications={applications} loading={isLoading} />
+        </TabsContent>
+
+        {/* ── Licence Approvals (officer / admin) ───────────────────────── */}
+        {isStaff && (
+          <TabsContent value="approval" className="pt-5">
+            <ApprovalQueue />
+          </TabsContent>
+        )}
+      </Tabs>
     </div>
   )
 }

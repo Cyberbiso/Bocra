@@ -1,22 +1,7 @@
 import { NextResponse } from 'next/server'
+import { getSupabaseAdmin } from '@/lib/supabase'
 
-// TODO: Replace with real query:
-// SELECT a.id, a.application_number, a.submitted_at,
-//        a.current_status_code, a.current_stage_code,
-//        a.priority_code, a.expected_decision_at,
-//        o.legal_name AS org_name,
-//        dc.brand_name, dc.model_name,
-//        u.full_name AS assigned_to_name,
-//        t.assigned_to_user_id
-// FROM   workflow.applications a
-// JOIN   iam.organizations o       ON o.id = a.applicant_org_id
-// JOIN   device.type_approval_applications ta ON ta.application_id = a.id
-// JOIN   device.device_catalog dc  ON dc.id = ta.device_model_id
-// LEFT JOIN workflow.application_tasks t
-//        ON t.application_id = a.id AND t.task_type_code = 'REVIEW'
-// LEFT JOIN iam.users u ON u.id = t.assigned_to_user_id
-// WHERE  a.service_module_code = 'TYPE_APPROVAL'
-// ORDER  BY a.submitted_at DESC
+export const runtime = 'nodejs'
 
 const MOCK_QUEUE = [
   {
@@ -118,5 +103,68 @@ const MOCK_QUEUE = [
 ]
 
 export async function GET() {
+  const supabase = getSupabaseAdmin()
+  if (supabase) {
+    try {
+      const { data: apps, error } = await supabase
+        .schema('workflow')
+        .from('applications')
+        .select('id, application_number, current_status_code, current_stage_code, priority_code, submitted_at, expected_decision_at, applicant_org_id')
+        .eq('service_module_code', 'TYPE_APPROVAL')
+        .not('current_status_code', 'eq', 'CANCELLED')
+        .order('submitted_at', { ascending: false })
+        .limit(50)
+      if (!error && apps?.length) {
+        // Try to get org names
+        const orgIds = [...new Set(apps.map((a: { applicant_org_id: string }) => a.applicant_org_id).filter(Boolean))]
+        let orgMap: Record<string, string> = {}
+        if (orgIds.length) {
+          const { data: orgs } = await supabase
+            .schema('iam')
+            .from('organizations')
+            .select('id, legal_name')
+            .in('id', orgIds)
+          orgMap = Object.fromEntries((orgs ?? []).map((o: { id: string; legal_name: string }) => [o.id, o.legal_name]))
+        }
+        // Try to get TA app + device info
+        const appIds = apps.map((a: { id: string }) => a.id)
+        const { data: taApps } = await supabase
+          .schema('device')
+          .from('type_approval_applications')
+          .select('workflow_application_id, device_model_id')
+          .in('workflow_application_id', appIds)
+        const modelIds = [...new Set((taApps ?? []).map((t: { device_model_id: string }) => t.device_model_id).filter(Boolean))]
+        let devMap: Record<string, { brand_name: string; model_name: string }> = {}
+        if (modelIds.length) {
+          const { data: devices } = await supabase
+            .schema('device')
+            .from('catalog')
+            .select('id, brand_name, model_name')
+            .in('id', modelIds)
+          devMap = Object.fromEntries(
+            (devices ?? []).map((d: { id: string; brand_name: string; model_name: string }) => [d.id, d])
+          )
+        }
+        const taMap: Record<string, string> = Object.fromEntries(
+          (taApps ?? []).map((t: { workflow_application_id: string; device_model_id: string }) => [t.workflow_application_id, t.device_model_id])
+        )
+
+        return NextResponse.json(
+          apps.map((a: { id: string; application_number: string; current_status_code: string; current_stage_code: string; priority_code: string; submitted_at: string; expected_decision_at: string; applicant_org_id: string }) => ({
+            id: a.id,
+            application_number: a.application_number,
+            submitted_at: a.submitted_at,
+            current_status_code: a.current_status_code,
+            current_stage_code: a.current_stage_code,
+            priority_code: a.priority_code ?? 'NORMAL',
+            expected_decision_at: a.expected_decision_at,
+            applicant_org: { legal_name: orgMap[a.applicant_org_id] ?? 'Unknown Organisation' },
+            device_catalog: devMap[taMap[a.id]] ?? { brand_name: 'Unknown', model_name: 'Unknown' },
+            assigned_to: null,
+          }))
+        )
+      }
+    } catch { /* fall through */ }
+  }
   return NextResponse.json(MOCK_QUEUE)
 }

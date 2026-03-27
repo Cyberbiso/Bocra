@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getSupabaseAdmin } from '@/lib/supabase'
 
 // TODO: Replace mock data with real query against
 // device.type_approval_records joined with
@@ -133,31 +134,61 @@ export async function GET(request: Request) {
   const name  = searchParams.get('name')  ?? ''
   const sim   = searchParams.get('sim')   ?? 'all'
 
-  if (!brand.trim()) {
-    return NextResponse.json({ error: 'brand is required' }, { status: 400 })
+  if (!brand.trim()) return NextResponse.json({ error: 'brand is required' }, { status: 400 })
+
+  const supabase = getSupabaseAdmin()
+  if (supabase) {
+    try {
+      // Query device catalog first (table is named 'catalog' in the device schema)
+      let dcQ = supabase
+        .schema('device')
+        .from('catalog')
+        .select('id, brand_name, marketing_name, model_name, is_sim_enabled, technical_spec')
+        .ilike('brand_name', `%${brand}%`)
+      if (model.trim()) dcQ = dcQ.ilike('model_name', `%${model}%`)
+      if (name.trim())  dcQ = dcQ.ilike('marketing_name', `%${name}%`)
+      if (sim === 'true')  dcQ = dcQ.eq('is_sim_enabled', true)
+      if (sim === 'false') dcQ = dcQ.eq('is_sim_enabled', false)
+      const { data: devices, error: dcErr } = await dcQ
+      if (!dcErr && devices?.length) {
+        const deviceIds = devices.map((d: { id: string }) => d.id)
+        const { data: records, error: rErr } = await supabase
+          .schema('device')
+          .from('type_approval_records')
+          .select('id, device_model_id, certificate_id, status_code, approval_date')
+          .eq('status_code', 'APPROVED')
+          .in('device_model_id', deviceIds)
+        if (!rErr && records?.length) {
+          const certIds = records.map((r: { certificate_id: string }) => r.certificate_id).filter(Boolean)
+          const { data: certs } = await supabase
+            .schema('docs')
+            .from('certificates')
+            .select('id, certificate_number, certificate_type, issue_date, status_code, qr_token')
+            .in('id', certIds)
+          const certMap = Object.fromEntries((certs ?? []).map((c: { id: string }) => [c.id, c]))
+          const devMap  = Object.fromEntries(devices.map((d: { id: string }) => [d.id, d]))
+          const results = records
+            .map((r: { id: string; device_model_id: string; certificate_id: string; status_code: string; approval_date: string }) => ({
+              id: r.id,
+              device_model_id: r.device_model_id,
+              certificate_id: r.certificate_id,
+              status_code: r.status_code,
+              approved_at: r.approval_date,
+              device_catalog: devMap[r.device_model_id] ?? null,
+              certificate: certMap[r.certificate_id] ?? null,
+            }))
+            .filter((r: { device_catalog: unknown; certificate: unknown }) => r.device_catalog && r.certificate)
+          return NextResponse.json(results)
+        }
+      }
+    } catch { /* fall through to mock */ }
   }
 
-  let results = MOCK_DB.filter((r) =>
-    r.device_catalog.brand_name.toLowerCase().includes(brand.toLowerCase())
-  )
-
-  if (model.trim()) {
-    results = results.filter((r) =>
-      r.device_catalog.model_name.toLowerCase().includes(model.toLowerCase())
-    )
-  }
-
-  if (name.trim()) {
-    results = results.filter((r) =>
-      r.device_catalog.marketing_name.toLowerCase().includes(name.toLowerCase())
-    )
-  }
-
-  if (sim === 'true') {
-    results = results.filter((r) => r.device_catalog.is_sim_enabled)
-  } else if (sim === 'false') {
-    results = results.filter((r) => !r.device_catalog.is_sim_enabled)
-  }
-
+  // Mock fallback
+  let results = MOCK_DB.filter((r) => r.device_catalog.brand_name.toLowerCase().includes(brand.toLowerCase()))
+  if (model.trim()) results = results.filter((r) => r.device_catalog.model_name.toLowerCase().includes(model.toLowerCase()))
+  if (name.trim())  results = results.filter((r) => r.device_catalog.marketing_name.toLowerCase().includes(name.toLowerCase()))
+  if (sim === 'true')  results = results.filter((r) => r.device_catalog.is_sim_enabled)
+  if (sim === 'false') results = results.filter((r) => !r.device_catalog.is_sim_enabled)
   return NextResponse.json(results)
 }

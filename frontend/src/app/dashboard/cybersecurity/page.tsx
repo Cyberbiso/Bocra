@@ -7,7 +7,7 @@ import {
   Paperclip, X, Lock, Clock, ChevronRight,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useRoleStore } from '@/lib/stores/role-store'
+import { useAppSelector } from '@/lib/store/hooks'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ function StepIndicator({ current }: { current: number }) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function CybersecurityPage() {
-  const { role } = useRoleStore()
+  const role = useAppSelector((s) => s.role.role)
 
   // Dialog
   const [dialogOpen, setDialogOpen] = useState(false)

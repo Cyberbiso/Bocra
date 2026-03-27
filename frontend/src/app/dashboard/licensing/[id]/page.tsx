@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { useRoleStore } from '@/lib/stores/role-store'
+import { useAppSelector } from '@/lib/store/hooks'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -694,7 +694,7 @@ function PageSkeleton() {
 
 export default function LicensingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const role   = useRoleStore((s) => s.role)
+  const role = useAppSelector((s) => s.role.role)
   const [tab, setTab] = useState<TabKey>('overview')
 
   // TODO: Replace with GET https://op-web.bocra.org.bw/api/licences/{id} or /api/applications/{id}

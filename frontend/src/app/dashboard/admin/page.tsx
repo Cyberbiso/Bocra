@@ -9,11 +9,14 @@ import {
 import {
   Lock, Users, AlertTriangle, Clock, TrendingUp,
   FileText, BarChart2, Database, Download, Plus, Edit2,
-  RefreshCw, Loader2, CheckCircle2, Filter,
+  RefreshCw, Loader2, CheckCircle2, Filter, Building2,
+  Search, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useRoleStore } from '@/lib/stores/role-store'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { useAppDispatch, useAppSelector } from '@/lib/store/hooks'
+import { fetchOrganisations, patchOrganisationStatus, setStatusOverride } from '@/lib/store/slices/organisationsSlice'
+import { format } from 'date-fns'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,13 +103,6 @@ const COMPLAINT_CATS = [
   { id: 5, name: 'Postal Services',   description: 'Lost mail, delivery failures' },
   { id: 6, name: 'Cybersecurity',     description: 'Data breaches, phishing' },
   { id: 7, name: 'Other',             description: 'Miscellaneous complaints' },
-]
-const LICENCE_TYPES_DATA = [
-  { id: 1, code: 'NSL', name: 'Network Service Licence',     category: 'Electronic Comms', fee: 'P 50,000' },
-  { id: 2, code: 'ASL', name: 'Application Service Licence', category: 'Electronic Comms', fee: 'P 25,000' },
-  { id: 3, code: 'BSL', name: 'Broadcasting Service Licence',category: 'Broadcasting',     fee: 'P 30,000' },
-  { id: 4, code: 'PSL', name: 'Postal Service Licence',      category: 'Postal',           fee: 'P 15,000' },
-  { id: 5, code: 'SML', name: 'Spectrum Management Licence', category: 'Spectrum',         fee: 'Variable' },
 ]
 const NOTIF_TEMPLATES = [
   { id: 1, name: 'Application Received',    trigger: 'On submission',       channels: 'Email, In-App' },
@@ -500,6 +496,15 @@ function AddEditBtn({ label = 'Edit' }: { label?: string }) {
 }
 
 function MasterDataTab() {
+  const [licenceTypes, setLicenceTypes] = useState<{ code: string; name: string; category: string; application_fee: string | null }[]>([])
+
+  useEffect(() => {
+    fetch('/api/licensing?action=types')
+      .then((r) => r.json())
+      .then((json) => setLicenceTypes(json.data ?? []))
+      .catch(() => {})
+  }, [])
+
   return (
     <Tabs defaultValue="categories">
       <TabsList className="mb-4">
@@ -525,7 +530,12 @@ function MasterDataTab() {
         <MasterTable
           addLabel="Add Licence Type"
           headers={['Code', 'Name', 'Category', 'Application Fee', 'Actions']}
-          rows={LICENCE_TYPES_DATA.map((r) => [r.code, r.name, r.category, r.fee])}
+          rows={licenceTypes.map((r) => [
+            r.code,
+            r.name,
+            r.category,
+            r.application_fee ? `P ${Number(r.application_fee).toLocaleString()}` : 'Variable',
+          ])}
         />
       </TabsContent>
 
@@ -584,12 +594,190 @@ function MasterTable({
   )
 }
 
+// ─── Organisations Tab ───────────────────────────────────────────────────────
+
+const ORG_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
+  PENDING_REVIEW: { label: 'Pending Review', cls: 'bg-amber-100 text-amber-700 border-amber-200'   },
+  ACTIVE:         { label: 'Active',         cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  SUSPENDED:      { label: 'Suspended',      cls: 'bg-red-100 text-red-700 border-red-200'         },
+  REJECTED:       { label: 'Rejected',       cls: 'bg-gray-100 text-gray-500 border-gray-200'      },
+}
+
+function OrgStatusBadge({ status }: { status: string }) {
+  const cfg = ORG_STATUS_CONFIG[status] ?? { label: status, cls: 'bg-gray-100 text-gray-500 border-gray-200' }
+  return (
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border', cfg.cls)}>
+      {cfg.label}
+    </span>
+  )
+}
+
+function OrganisationsTab() {
+  const dispatch = useAppDispatch()
+  const { items, meta, loading, statusOverrides } = useAppSelector((s) => s.organisations)
+  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [search, setSearch]             = useState('')
+  const [searchInput, setSearchInput]   = useState('')
+
+  useEffect(() => {
+    dispatch(fetchOrganisations({ page: meta.page, status: statusFilter, search }))
+  }, [dispatch, meta.page, statusFilter, search])
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault()
+    setSearch(searchInput.trim())
+  }
+
+  function handleStatusChange(id: string, newStatus: string) {
+    dispatch(setStatusOverride({ id, status_code: newStatus }))
+    dispatch(patchOrganisationStatus({ id, status_code: newStatus }))
+  }
+
+  function goToPage(p: number) {
+    dispatch(fetchOrganisations({ page: p, status: statusFilter, search }))
+  }
+
+  const displayItems = items.map((o) => ({
+    ...o,
+    status_code: statusOverrides[o.id] ?? o.status_code,
+  }))
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        <form onSubmit={handleSearch} className="flex gap-2 flex-1 max-w-sm">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search name or reg. number…"
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
+            />
+          </div>
+          <button type="submit" className="px-3 py-2 bg-[#003580] text-white text-sm rounded-lg hover:bg-[#002a6e] transition-colors">
+            Search
+          </button>
+        </form>
+        <select
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); dispatch(fetchOrganisations({ page: 1, status: e.target.value, search })) }}
+          className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
+        >
+          <option value="ALL">All Statuses</option>
+          {Object.entries(ORG_STATUS_CONFIG).map(([v, { label }]) => (
+            <option key={v} value={v}>{label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Summary pills */}
+      <div className="flex flex-wrap gap-2">
+        {Object.entries(ORG_STATUS_CONFIG).map(([status, { label, cls }]) => {
+          const count = items.filter((o) => o.status_code === status).length
+          if (!count) return null
+          return (
+            <span key={status} className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border', cls)}>
+              {label} <span className="font-bold">{count}</span>
+            </span>
+          )
+        })}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-sm text-gray-400">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading organisations…
+          </div>
+        ) : displayItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-2 text-gray-400">
+            <Building2 className="w-8 h-8" />
+            <p className="text-sm">No organisations found.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Organisation</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Type</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Reg. Number</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Registered</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {displayItems.map((org) => (
+                  <tr key={org.id} className="hover:bg-gray-50/60 transition-colors">
+                    <td className="px-4 py-3.5">
+                      <p className="font-medium text-gray-900">{org.legal_name}</p>
+                      {org.trading_name && <p className="text-xs text-gray-400 mt-0.5">t/a {org.trading_name}</p>}
+                    </td>
+                    <td className="px-4 py-3.5 text-gray-500 text-xs">{org.org_type_code ?? '—'}</td>
+                    <td className="px-4 py-3.5">
+                      {org.registration_number
+                        ? <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-700">{org.registration_number}</code>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
+                      {format(new Date(org.created_at), 'dd MMM yyyy')}
+                    </td>
+                    <td className="px-4 py-3.5"><OrgStatusBadge status={org.status_code} /></td>
+                    <td className="px-4 py-3.5">
+                      <select
+                        value={org.status_code}
+                        onChange={(e) => handleStatusChange(org.id, e.target.value)}
+                        className="text-xs border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#003580]/20 bg-white"
+                      >
+                        {Object.entries(ORG_STATUS_CONFIG).map(([v, { label }]) => (
+                          <option key={v} value={v}>{label}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Pagination */}
+      {meta.totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span>{meta.total} organisation{meta.total !== 1 ? 's' : ''}</span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => goToPage(meta.page - 1)}
+              disabled={meta.page <= 1}
+              className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <span className="px-2">Page {meta.page} of {meta.totalPages}</span>
+            <button
+              onClick={() => goToPage(meta.page + 1)}
+              disabled={meta.page >= meta.totalPages}
+              className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 const TAB_TRIGGER = 'rounded-none h-11 px-5 text-sm flex-none after:bg-[#003580] data-active:text-[#003580] data-active:font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#003580]/40'
 
 export default function AdminPage() {
-  const { role } = useRoleStore()
+  const role = useAppSelector((s) => s.role.role)
   const router   = useRouter()
 
   useEffect(() => {
@@ -648,12 +836,17 @@ export default function AdminPage() {
             <Database className="size-3.5" />
             Master Data
           </TabsTrigger>
+          <TabsTrigger value="organisations" className={cn(TAB_TRIGGER, 'flex items-center gap-2')}>
+            <Building2 className="size-3.5" />
+            Organisations
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="queue"   className="pt-5"><QueueTab /></TabsContent>
-        <TabsContent value="sla"     className="pt-5"><SlaTab /></TabsContent>
-        <TabsContent value="reports" className="pt-5"><ReportsTab /></TabsContent>
-        <TabsContent value="master"  className="pt-5"><MasterDataTab /></TabsContent>
+        <TabsContent value="queue"         className="pt-5"><QueueTab /></TabsContent>
+        <TabsContent value="sla"           className="pt-5"><SlaTab /></TabsContent>
+        <TabsContent value="reports"       className="pt-5"><ReportsTab /></TabsContent>
+        <TabsContent value="master"        className="pt-5"><MasterDataTab /></TabsContent>
+        <TabsContent value="organisations" className="pt-5"><OrganisationsTab /></TabsContent>
       </Tabs>
     </div>
   )

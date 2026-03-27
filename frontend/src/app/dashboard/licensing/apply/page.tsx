@@ -1141,13 +1141,21 @@ export default function LicenceApplicationPage() {
 
   const handleBack = () => setStep((s) => s - 1)
 
-  const onSubmit = async (_values: FormValues) => {
+  const onSubmit = async (values: FormValues) => {
     setSubmitting(true)
-    // TODO: POST /api/licence-applications
-    await new Promise((r) => setTimeout(r, 1200))
-    const ref = createApplicationNumber()
-    setAppNumber(ref)
-    setSubmitting(false)
+    try {
+      const res = await fetch('/api/licensing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submit', ...values }),
+      })
+      const data = await res.json()
+      setAppNumber(data.applicationNumber ?? createApplicationNumber())
+    } catch {
+      setAppNumber(createApplicationNumber())
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   // Success state

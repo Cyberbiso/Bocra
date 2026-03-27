@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
+import { useAppDispatch } from '@/lib/store/hooks'
+import { setRole } from '@/lib/store/slices/roleSlice'
+import type { Role } from '@/lib/types/roles'
 
 export default function LoginForm() {
   const [email, setEmail] = useState('')
@@ -13,6 +16,7 @@ export default function LoginForm() {
   const [error, setError] = useState('')
   const router = useRouter()
   const searchParams = useSearchParams()
+  const dispatch = useAppDispatch()
   const from = searchParams.get('from') || '/dashboard/home'
 
   async function handleSubmit(e: React.FormEvent) {
@@ -31,6 +35,12 @@ export default function LoginForm() {
         const data = await res.json().catch(() => ({}))
         setError((data as { error?: string }).error || 'Sign in failed. Please try again.')
         return
+      }
+
+      const data = await res.json()
+      const role = data?.user?.role as Role | undefined
+      if (role === 'officer' || role === 'admin' || role === 'applicant') {
+        dispatch(setRole(role))
       }
 
       router.push(from)

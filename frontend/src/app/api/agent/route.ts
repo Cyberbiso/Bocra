@@ -3,29 +3,50 @@ import { SYSTEM_PROMPT } from '@/lib/agent/system-prompt'
 
 export const runtime = 'nodejs'
 
-interface AnthropicMessage {
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
+
+interface AgentMessage {
   role: 'user' | 'assistant'
   content: string
 }
 
-interface SseEvent {
-  type: string
-  delta?: { type: string; text: string }
+type GeminiPayload = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string
+      }>
+    }
+  }>
+  error?: {
+    message?: string
+  }
+}
+
+function extractText(payload: GeminiPayload) {
+  const parts = payload.candidates?.[0]?.content?.parts
+  if (!Array.isArray(parts)) return ''
+
+  return parts
+    .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+    .join('\n')
+    .trim()
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
+  if (!GEMINI_API_KEY) {
     return new Response(
-      JSON.stringify({ error: 'ANTHROPIC_API_KEY is not configured.' }),
+      JSON.stringify({ error: 'Gemini is not configured. Set GEMINI_API_KEY on the frontend deployment.' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } },
     )
   }
 
-  let messages: AnthropicMessage[]
+  let messages: AgentMessage[]
   let threadId: string | undefined
+
   try {
-    const body = (await req.json()) as { messages?: AnthropicMessage[]; threadId?: string }
+    const body = (await req.json()) as { messages?: AgentMessage[]; threadId?: string }
     messages = Array.isArray(body.messages) ? body.messages : []
     threadId = body.threadId
   } catch {
@@ -35,7 +56,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  void threadId // used by client for routing, not needed server-side
+  void threadId
 
   if (messages.length === 0) {
     return new Response(
@@ -44,67 +65,55 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const upstream = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+  const upstream = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: SYSTEM_PROMPT }],
+        },
+        contents: messages.map((message) => ({
+          role: message.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: message.content }],
+        })),
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 1024,
+        },
+      }),
+      cache: 'no-store',
     },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      stream: true,
-      system: SYSTEM_PROMPT,
-      messages,
-    }),
-  })
+  )
+
+  const payload = (await upstream.json().catch(() => ({}))) as GeminiPayload
 
   if (!upstream.ok) {
-    const detail = await upstream.text().catch(() => '')
+    const detail =
+      typeof payload?.error?.message === 'string'
+        ? payload.error.message
+        : 'Gemini request failed.'
+
     return new Response(
-      JSON.stringify({ error: `Anthropic API error (${upstream.status})`, detail }),
+      JSON.stringify({ error: `Gemini API error (${upstream.status})`, detail }),
       { status: upstream.status, headers: { 'Content-Type': 'application/json' } },
     )
   }
 
-  const encoder = new TextEncoder()
-  const stream = new ReadableStream({
-    async start(controller) {
-      const reader = upstream.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
+  const text = extractText(payload)
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+  if (!text) {
+    return new Response(
+      JSON.stringify({ error: 'Gemini did not return a text response.' }),
+      { status: 502, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
 
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() ?? ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const data = line.slice(6).trim()
-            if (!data || data === '[DONE]') continue
-            try {
-              const event = JSON.parse(data) as SseEvent
-              if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-                controller.enqueue(encoder.encode(event.delta.text))
-              }
-            } catch {
-              // skip malformed SSE lines
-            }
-          }
-        }
-      } finally {
-        controller.close()
-      }
-    },
-  })
-
-  return new Response(stream, {
+  return new Response(text, {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'no-cache',

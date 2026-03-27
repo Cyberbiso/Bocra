@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.security import new_session_token, session_expires_at, utcnow, verify_password
 from app.integrations.supabase import SupabaseAuthAdapter
 from app.models.entities import Role, SessionToken, User, UserRole, uuid_str
@@ -11,6 +12,17 @@ from app.repositories.bocra import AuthRepository
 
 
 ROLE_PRIORITY = {"public": 0, "applicant": 1, "officer": 2, "type_approver": 3, "admin": 4}
+settings = get_settings()
+
+# Frontend demo fallback tokens — hardcoded strings that aren't stored in any DB.
+# Maps token → email of the corresponding seeded user.
+_DEMO_TOKEN_EMAILS: dict[str, str] = {
+    "demo-session-applicant": "applicant@bocra.demo",
+    "demo-session-officer": "officer@bocra.demo",
+    "demo-session-type-approver": "approver@bocra.demo",
+    "demo-session-admin": "admin@bocra.demo",
+    "demo-session": "applicant@bocra.demo",
+}
 
 
 @dataclass(slots=True)
@@ -62,6 +74,13 @@ class AuthService:
     # ── Token validation ───────────────────────────────────────────────────
 
     def get_user_from_token(self, access_token: str) -> LoginResult | None:
+        # 0. Recognise frontend demo tokens (non-production only)
+        if settings.app_env != "production" and access_token in _DEMO_TOKEN_EMAILS:
+            email = _DEMO_TOKEN_EMAILS[access_token]
+            user = self.repo.get_user_by_email(email)
+            if user:
+                return self._result_for_user(user, access_token)
+
         # 1. Check local session tokens (created by backend login)
         session = self.repo.get_active_session(access_token)
         if session and session.user:

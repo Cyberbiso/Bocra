@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import {
   AUTH_SESSION_COOKIE,
-  isDemoSessionToken,
 } from '@/lib/server-auth'
 import { backendFetch } from '@/lib/backend'
 
@@ -11,7 +10,7 @@ export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   const token = request.cookies.get(AUTH_SESSION_COOKIE)?.value
 
-  if (token && !isDemoSessionToken(token)) {
+  if (token) {
     const supabase = getSupabaseAdmin()
     if (supabase) {
       await supabase.schema('iam').from('sessions').delete().eq('token', token)

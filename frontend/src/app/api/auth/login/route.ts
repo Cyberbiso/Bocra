@@ -138,6 +138,29 @@ export async function POST(request: Request) {
     const demoUser = DEMO_LOGIN_USERS[email.toLowerCase()]
     if (demoUser && password === DEMO_PASSWORD) {
       const { token, ...userFields } = demoUser
+      if (supabase) {
+        try {
+          const { data: users } = await supabase
+            .schema('iam')
+            .from('users')
+            .select('id')
+            .eq('email', email.toLowerCase().trim())
+            .limit(1)
+
+          const userId = users?.[0]?.id
+          if (userId) {
+            const expiresAt = new Date(Date.now() + SESSION_SECONDS * 1000).toISOString()
+            await supabase.schema('iam').from('sessions').delete().eq('token', token)
+            await supabase.schema('iam').from('sessions').insert({
+              user_id: userId,
+              token,
+              expires_at: expiresAt,
+            })
+          }
+        } catch (err) {
+          console.warn('Demo session sync failed', err)
+        }
+      }
       const response = NextResponse.json({ success: true, user: { email, ...userFields } })
       response.cookies.set(AUTH_SESSION_COOKIE, token, {
         httpOnly: true,

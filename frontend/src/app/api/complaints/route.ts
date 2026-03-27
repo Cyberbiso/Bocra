@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backendFetch } from "@/lib/backend";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { getSessionUserFromRequest } from "@/lib/server-auth";
 import {
   isAllowedComplaintAttachment,
   MAX_COMPLAINT_ATTACHMENTS,
@@ -72,12 +73,26 @@ function rowToComplaint(row: any): Complaint {
 
 export async function GET(request: NextRequest) {
   const supabase = getSupabaseAdmin();
+  const sessionUser = await getSessionUserFromRequest(request);
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const query = request.nextUrl.searchParams.toString();
+  const path = query ? `/api/complaints?${query}` : "/api/complaints";
+
+  try {
+    const upstream = await backendFetch(path, {
+      headers: { cookie: cookieHeader },
+      cache: "no-store",
+    });
+    if (upstream.ok) {
+      const data = await upstream.json();
+      return NextResponse.json(data, { status: upstream.status });
+    }
+  } catch {
+    // Fall back to direct Supabase reads below.
+  }
 
   // Fall back to FastAPI proxy when Supabase is not configured
   if (!supabase) {
-    const cookieHeader = request.headers.get("cookie") ?? "";
-    const query = request.nextUrl.searchParams.toString();
-    const path = query ? `/api/complaints?${query}` : "/api/complaints";
     try {
       const upstream = await backendFetch(path, {
         headers: { cookie: cookieHeader },
@@ -104,6 +119,13 @@ export async function GET(request: NextRequest) {
   const operatorFilter = params.get("operator");
   const dateFrom       = params.get("dateFrom");
   const dateTo         = params.get("dateTo");
+
+  if (!sessionUser) {
+    return NextResponse.json(
+      { error: "Not authenticated." },
+      { status: 401 },
+    );
+  }
 
   try {
     // Supabase non-public schema: complaints.complaints
@@ -134,6 +156,9 @@ export async function GET(request: NextRequest) {
 
     if (statusFilter && statusFilter !== "ALL") {
       q = q.eq("current_status_code", statusFilter);
+    }
+    if (sessionUser.role !== "officer" && sessionUser.role !== "admin") {
+      q = q.eq("complainant_user_id", sessionUser.id);
     }
     if (operatorFilter && operatorFilter !== "ALL") {
       q = q.eq("service_provider_name", operatorFilter);

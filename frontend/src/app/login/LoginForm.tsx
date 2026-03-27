@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
 import { useAppDispatch } from '@/lib/store/hooks'
 import { setRole } from '@/lib/store/slices/roleSlice'
-import type { Role } from '@/lib/types/roles'
+import { isRole, type Role } from '@/lib/types/roles'
 
 export default function LoginForm() {
   const [email, setEmail] = useState('')
@@ -39,7 +39,7 @@ export default function LoginForm() {
 
       const data = await res.json()
       const role = data?.user?.role as Role | undefined
-      if (role === 'officer' || role === 'admin' || role === 'applicant') {
+      if (isRole(role)) {
         dispatch(setRole(role))
       }
 

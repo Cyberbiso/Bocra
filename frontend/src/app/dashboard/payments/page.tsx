@@ -25,6 +25,8 @@ import {
   DialogContent,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useAppSelector } from '@/lib/store/hooks'
+import { isBocraStaff } from '@/lib/types/roles'
 import { cn } from '@/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -294,11 +296,13 @@ function PayNowDialog({
   open,
   onClose,
   onPaid,
+  isStaff = false,
 }: {
   invoice: Invoice | null
   open: boolean
   onClose: () => void
   onPaid: (invoiceId: string, receiptNumber: string) => void
+  isStaff?: boolean
 }) {
   const [method,    setMethod]    = useState<PaymentMethod>('mobile_money')
   const [reference, setReference] = useState('')
@@ -343,9 +347,13 @@ function PayNowDialog({
               <CheckCircle2 className="w-9 h-9 text-emerald-600" />
             </div>
             <div>
-              <p className="text-base font-bold text-gray-900">Payment Confirmed</p>
+              <p className="text-base font-bold text-gray-900">
+                {isStaff ? 'Payment Recorded' : 'Payment Confirmed'}
+              </p>
               <p className="text-xs text-gray-500 mt-1 max-w-xs">
-                Your payment for {invoice.number} has been received. A receipt has been issued.
+                {isStaff
+                  ? `The payment for ${invoice.number} has been captured and a receipt entry has been issued.`
+                  : `Your payment for ${invoice.number} has been received. A receipt has been issued.`}
               </p>
             </div>
             <div className="w-full rounded-xl border-2 border-emerald-200 bg-emerald-50 px-5 py-4 space-y-0.5">
@@ -373,9 +381,13 @@ function PayNowDialog({
           /* ── Payment form ── */
           <div className="space-y-4">
             <div>
-              <p className="text-base font-semibold text-gray-900">Pay Invoice</p>
+              <p className="text-base font-semibold text-gray-900">
+                {isStaff ? 'Record Payment' : 'Pay Invoice'}
+              </p>
               <p className="text-xs text-gray-400 mt-0.5">
-                Complete payment for the invoice below.
+                {isStaff
+                  ? 'Capture payment details against the selected invoice and issue the receipt entry below.'
+                  : 'Complete payment for the invoice below.'}
               </p>
             </div>
 
@@ -488,7 +500,9 @@ function PayNowDialog({
                 </p>
               )}
               <p className="mt-1 text-xs text-gray-400">
-                Enter the transaction reference from your bank or mobile money confirmation.
+                {isStaff
+                  ? 'Enter the payer transaction reference from the bank, card, or mobile money confirmation.'
+                  : 'Enter the transaction reference from your bank or mobile money confirmation.'}
               </p>
             </div>
 
@@ -500,9 +514,9 @@ function PayNowDialog({
               className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#003580] text-white py-3 text-sm font-semibold hover:bg-[#002a6b] transition-colors shadow-sm disabled:opacity-60"
             >
               {paying ? (
-                <><Loader2 className="w-4 h-4 animate-spin" />Processing payment…</>
+                <><Loader2 className="w-4 h-4 animate-spin" />{isStaff ? 'Recording payment…' : 'Processing payment…'}</>
               ) : (
-                <><Check className="w-4 h-4" />Confirm Payment — {bwp(invoice.amount + invoice.vat)}</>
+                <><Check className="w-4 h-4" />{isStaff ? 'Record Payment' : 'Confirm Payment'} — {bwp(invoice.amount + invoice.vat)}</>
               )}
             </button>
           </div>
@@ -518,10 +532,12 @@ function InvoicesTab({
   invoices,
   paidIds,
   onPay,
+  isStaff = false,
 }: {
   invoices: Invoice[]
   paidIds: Set<string>
   onPay: (invoice: Invoice) => void
+  isStaff?: boolean
 }) {
   const [query, setQuery] = useState('')
   const outstanding = useMemo(() => {
@@ -548,7 +564,7 @@ function InvoicesTab({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by invoice number, application, or description…"
+          placeholder={isStaff ? 'Search by invoice number, application, service, or debtor…' : 'Search by invoice number, application, or description…'}
           className="w-full h-9 pl-9 pr-9 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
         />
         {query && (
@@ -565,6 +581,7 @@ function InvoicesTab({
             <Banknote className="w-4 h-4 text-gray-400" />
             <div>
               <p className="text-xs text-gray-400">Total Outstanding</p>
+              {isStaff && <p className="text-[10px] text-gray-400">Open billing queue</p>}
               <p className="text-sm font-bold text-gray-800">{bwp(totalOwing)}</p>
             </div>
           </div>
@@ -572,7 +589,7 @@ function InvoicesTab({
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-red-500" />
               <div>
-                <p className="text-xs text-red-600">Overdue</p>
+                <p className="text-xs text-red-600">{isStaff ? 'Requires Follow-up' : 'Overdue'}</p>
                 <p className="text-sm font-bold text-red-700">
                   {overdue.length} invoice{overdue.length !== 1 ? 's' : ''} — {bwp(overdue.reduce((s, i) => s + i.amount + i.vat, 0))}
                 </p>
@@ -585,13 +602,17 @@ function InvoicesTab({
       {allOutstanding.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-14 gap-2 text-gray-400">
           <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-          <p className="text-sm font-medium text-emerald-600">All invoices paid</p>
-          <p className="text-xs">No outstanding amounts. Check Payment History for records.</p>
+          <p className="text-sm font-medium text-emerald-600">
+            {isStaff ? 'Billing queue is clear' : 'All invoices paid'}
+          </p>
+          <p className="text-xs">
+            {isStaff ? 'No outstanding invoices require settlement right now.' : 'No outstanding amounts. Check Payment History for records.'}
+          </p>
         </div>
       ) : outstanding.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-14 gap-2 text-gray-400">
           <Search className="w-8 h-8" />
-          <p className="text-sm">No invoices match your search.</p>
+          <p className="text-sm">{isStaff ? 'No billing items match your search.' : 'No invoices match your search.'}</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -665,7 +686,7 @@ function InvoicesTab({
                         )}
                       >
                         <CreditCard className="w-3.5 h-3.5" />
-                        Pay Now
+                        {isStaff ? 'Record Payment' : 'Pay Now'}
                       </button>
                     </Td>
                   </tr>
@@ -687,7 +708,7 @@ const PAYMENT_STATUS_CONFIG: Record<PaymentStatus, { label: string; icon: React.
   PENDING:   { label: 'Pending',   icon: Clock,        cls: 'bg-amber-50 text-amber-700 border-amber-200'       },
 }
 
-function PaymentHistoryTab({ payments }: { payments: PaymentRecord[] }) {
+function PaymentHistoryTab({ payments, isStaff = false }: { payments: PaymentRecord[]; isStaff?: boolean }) {
   const [query, setQuery] = useState('')
   const filtered = useMemo(() => {
     if (!query.trim()) return payments
@@ -704,7 +725,7 @@ function PaymentHistoryTab({ payments }: { payments: PaymentRecord[] }) {
     return (
       <div className="flex flex-col items-center justify-center py-14 gap-2 text-gray-400">
         <Receipt className="w-8 h-8" />
-        <p className="text-sm">No payment history yet.</p>
+        <p className="text-sm">{isStaff ? 'No payment ledger entries yet.' : 'No payment history yet.'}</p>
       </div>
     )
   }
@@ -717,7 +738,7 @@ function PaymentHistoryTab({ payments }: { payments: PaymentRecord[] }) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by invoice number, service, or reference…"
+          placeholder={isStaff ? 'Search the payment ledger by invoice, service, or reference…' : 'Search by invoice number, service, or reference…'}
           className="w-full h-9 pl-9 pr-9 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
         />
         {query && (
@@ -795,7 +816,7 @@ function PaymentHistoryTab({ payments }: { payments: PaymentRecord[] }) {
 
 // ─── Tab 3 — Receipts ─────────────────────────────────────────────────────────
 
-function ReceiptsTab({ receipts }: { receipts: Receipt[] }) {
+function ReceiptsTab({ receipts, isStaff = false }: { receipts: Receipt[]; isStaff?: boolean }) {
   const [query, setQuery] = useState('')
   const filtered = useMemo(() => {
     if (!query.trim()) return receipts
@@ -812,7 +833,7 @@ function ReceiptsTab({ receipts }: { receipts: Receipt[] }) {
     return (
       <div className="flex flex-col items-center justify-center py-14 gap-2 text-gray-400">
         <FileText className="w-8 h-8" />
-        <p className="text-sm">No receipts yet.</p>
+        <p className="text-sm">{isStaff ? 'No receipts have been issued yet.' : 'No receipts yet.'}</p>
       </div>
     )
   }
@@ -825,7 +846,7 @@ function ReceiptsTab({ receipts }: { receipts: Receipt[] }) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by receipt number, invoice number, or service…"
+          placeholder={isStaff ? 'Search the receipt register by receipt, invoice, or service…' : 'Search by receipt number, invoice number, or service…'}
           className="w-full h-9 pl-9 pr-9 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#003580]/20"
         />
         {query && (
@@ -874,7 +895,7 @@ function ReceiptsTab({ receipts }: { receipts: Receipt[] }) {
                     className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    Download PDF
+                    {isStaff ? 'Open Receipt' : 'Download PDF'}
                   </button>
                 </Td>
               </tr>
@@ -889,6 +910,8 @@ function ReceiptsTab({ receipts }: { receipts: Receipt[] }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PaymentsPage() {
+  const role = useAppSelector((s) => s.role.role)
+  const isStaff = isBocraStaff(role)
   const [paidIds, setPaidIds]         = useState<Set<string>>(new Set())
   const [payingInvoice, setPayInv]    = useState<Invoice | null>(null)
   const [dialogOpen, setDialogOpen]   = useState(false)
@@ -896,6 +919,10 @@ export default function PaymentsPage() {
   // Receipts include both mock + newly paid this session
   const [sessionReceipts, setSessionReceipts] = useState<Receipt[]>([])
   const allReceipts = [...MOCK_RECEIPTS, ...sessionReceipts]
+  const outstandingInvoices = MOCK_INVOICES.filter((i) => !paidIds.has(i.id))
+  const totalOutstanding = outstandingInvoices.reduce((sum, invoice) => sum + invoice.amount + invoice.vat, 0)
+  const completedPayments = MOCK_PAYMENTS.filter((payment) => payment.status === 'COMPLETED').length
+  const pendingLedger = MOCK_PAYMENTS.filter((payment) => payment.status === 'PENDING').length
 
   const overdueCount = MOCK_INVOICES.filter(
     (i) => i.status === 'OVERDUE' && !paidIds.has(i.id),
@@ -933,8 +960,48 @@ export default function PaymentsPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Payments & Billing</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Manage invoices, track payments, and download receipts.
+          {isStaff
+            ? 'Monitor open invoices, record incoming payments, and manage the BOCRA receipt register.'
+            : 'Manage invoices, track payments, and download receipts.'}
         </p>
+      </div>
+
+      <div className={cn(
+        'rounded-xl border px-5 py-4 flex items-start gap-3',
+        isStaff ? 'border-[#003580]/15 bg-[#003580]/5' : 'border-gray-200 bg-white shadow-sm',
+      )}>
+        <Receipt className={cn('w-5 h-5 shrink-0 mt-0.5', isStaff ? 'text-[#003580]' : 'text-gray-400')} />
+        <div>
+          <p className="text-sm font-semibold text-gray-900">
+            {isStaff ? 'BOCRA Revenue Desk Workspace' : 'Applicant Billing Workspace'}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {isStaff
+              ? 'Staff use this page to reconcile invoices, capture payment references, and keep the receipt register current.'
+              : 'Use this page to settle invoices, follow your payment history, and retrieve BOCRA receipts.'}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {(isStaff
+          ? [
+              { label: 'Billing Queue', value: outstandingInvoices.length, accent: 'border-blue-200 bg-blue-50 text-blue-800' },
+              { label: 'Overdue Follow-up', value: overdueCount, accent: overdueCount > 0 ? 'border-red-200 bg-red-50 text-red-800' : 'border-gray-200 bg-gray-50 text-gray-600' },
+              { label: 'Pending Ledger Items', value: pendingLedger, accent: pendingLedger > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600' },
+              { label: 'Receipts Issued', value: allReceipts.length, accent: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
+            ]
+          : [
+              { label: 'Outstanding Total', value: bwp(totalOutstanding), accent: 'border-blue-200 bg-blue-50 text-blue-800' },
+              { label: 'Overdue Invoices', value: overdueCount, accent: overdueCount > 0 ? 'border-red-200 bg-red-50 text-red-800' : 'border-gray-200 bg-gray-50 text-gray-600' },
+              { label: 'Completed Payments', value: completedPayments, accent: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
+              { label: 'Receipts Available', value: allReceipts.length, accent: 'border-amber-200 bg-amber-50 text-amber-800' },
+            ]).map((card) => (
+          <div key={card.label} className={cn('rounded-xl border px-4 py-3.5', card.accent)}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide">{card.label}</p>
+            <p className="text-lg font-bold text-gray-900 mt-1">{card.value}</p>
+          </div>
+        ))}
       </div>
 
       {/* ── Overdue alert ────────────────────────────────────────────────── */}
@@ -943,11 +1010,21 @@ export default function PaymentsPage() {
           <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-semibold text-red-800">
-              {overdueCount} overdue invoice{overdueCount !== 1 ? 's' : ''} requiring immediate payment
+              {isStaff
+                ? `${overdueCount} overdue invoice${overdueCount !== 1 ? 's' : ''} requiring billing follow-up`
+                : `${overdueCount} overdue invoice${overdueCount !== 1 ? 's' : ''} requiring immediate payment`}
             </p>
             <p className="text-xs text-red-700 mt-0.5">
-              Overdue payments may result in licence suspension or regulatory action.
-              Contact BOCRA on <strong>+267 395 7755</strong> if you need a payment extension.
+              {isStaff ? (
+                <>
+                  Review the queue, capture settlements, or escalate debtor follow-up before the related service is suspended.
+                </>
+              ) : (
+                <>
+                  Overdue payments may result in licence suspension or regulatory action.
+                  Contact BOCRA on <strong>+267 395 7755</strong> if you need a payment extension.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -965,7 +1042,7 @@ export default function PaymentsPage() {
               value="invoices"
               className="rounded-none h-12 px-5 text-sm flex-none after:bg-[#003580] data-active:text-[#003580] data-active:font-semibold"
             >
-              Outstanding Invoices
+              {isStaff ? 'Billing Queue' : 'Outstanding Invoices'}
               {overdueCount > 0 && (
                 <span className="ml-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-100 px-1.5 text-[11px] font-bold text-red-700">
                   {overdueCount}
@@ -976,13 +1053,13 @@ export default function PaymentsPage() {
               value="history"
               className="rounded-none h-12 px-5 text-sm flex-none after:bg-[#003580] data-active:text-[#003580] data-active:font-semibold"
             >
-              Payment History
+              {isStaff ? 'Payment Ledger' : 'Payment History'}
             </TabsTrigger>
             <TabsTrigger
               value="receipts"
               className="rounded-none h-12 px-5 text-sm flex-none after:bg-[#003580] data-active:text-[#003580] data-active:font-semibold"
             >
-              Receipts
+              {isStaff ? 'Receipt Register' : 'Receipts'}
               {allReceipts.length > 0 && (
                 <span className="ml-2 text-xs text-gray-400 font-normal">
                   ({allReceipts.length})
@@ -993,15 +1070,15 @@ export default function PaymentsPage() {
 
           {/* Tab panels */}
           <TabsContent value="invoices" className="p-5">
-            <InvoicesTab invoices={MOCK_INVOICES} paidIds={paidIds} onPay={handlePay} />
+            <InvoicesTab invoices={MOCK_INVOICES} paidIds={paidIds} onPay={handlePay} isStaff={isStaff} />
           </TabsContent>
 
           <TabsContent value="history" className="p-5">
-            <PaymentHistoryTab payments={MOCK_PAYMENTS} />
+            <PaymentHistoryTab payments={MOCK_PAYMENTS} isStaff={isStaff} />
           </TabsContent>
 
           <TabsContent value="receipts" className="p-5">
-            <ReceiptsTab receipts={allReceipts} />
+            <ReceiptsTab receipts={allReceipts} isStaff={isStaff} />
           </TabsContent>
         </Tabs>
       </div>
@@ -1012,6 +1089,7 @@ export default function PaymentsPage() {
         open={dialogOpen}
         onClose={handleCloseDialog}
         onPaid={handlePaid}
+        isStaff={isStaff}
       />
     </div>
   )

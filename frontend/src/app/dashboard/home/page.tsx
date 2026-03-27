@@ -27,11 +27,17 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useAppSelector } from '@/lib/store/hooks'
+import {
+  canReviewLicensing,
+  canReviewTypeApproval,
+  ROLE_LABELS,
+  type Role,
+} from '@/lib/types/roles'
 import { cn } from '@/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DashboardRole = 'applicant' | 'officer' | 'admin'
+type DashboardRole = Role
 
 interface ActivityItem {
   id: string
@@ -80,6 +86,14 @@ const SUMMARY_DATA: Record<DashboardRole, {
     certificates: 2,
     reviewQueue: 14,
     slaBreaches: 3,
+  },
+  type_approver: {
+    applications: 16,
+    complaints: 0,
+    invoiceCount: 5,
+    invoiceTotal: 'P 42 000.00',
+    certificates: 9,
+    reviewQueue: 18,
   },
   admin: {
     applications: 18,
@@ -269,13 +283,8 @@ export default function DashboardHomePage() {
   const roleBadgeStyle: Record<DashboardRole, string> = {
     applicant: 'bg-sky-100 text-sky-700 border-sky-200',
     officer: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    type_approver: 'bg-amber-100 text-amber-700 border-amber-200',
     admin: 'bg-rose-100 text-rose-700 border-rose-200',
-  }
-
-  const roleLabel: Record<DashboardRole, string> = {
-    applicant: 'Applicant / Requestor',
-    officer: 'BOCRA Officer',
-    admin: 'Administrator',
   }
 
   return (
@@ -296,7 +305,7 @@ export default function DashboardHomePage() {
                 roleBadgeStyle[role]
               )}
             >
-              {roleLabel[role]}
+              {ROLE_LABELS[role]}
             </span>
             <span className="text-sm text-gray-400">
               {new Date().toLocaleDateString('en-BW', {
@@ -379,7 +388,7 @@ export default function DashboardHomePage() {
         </div>
 
         {/* Officer-only cards */}
-        {(role === 'officer' || role === 'admin') && (
+        {canReviewLicensing(role) && (
           <div className="grid grid-cols-2 gap-4 mt-4">
             {/* TODO: Officer queue counts from GET /api/officer/queue-summary */}
             <StatCard
@@ -398,6 +407,27 @@ export default function DashboardHomePage() {
               iconBg="bg-red-50"
               iconColor="text-red-500"
               countColor={summary.slaBreaches && summary.slaBreaches > 0 ? 'text-red-600' : undefined}
+            />
+          </div>
+        )}
+
+        {canReviewTypeApproval(role) && !canReviewLicensing(role) && (
+          <div className="grid grid-cols-2 gap-4 mt-4">
+            <StatCard
+              title="Type Approval Queue"
+              count={summary.reviewQueue ?? 0}
+              href="/dashboard/certificates"
+              icon={ClipboardList}
+              iconBg="bg-amber-50"
+              iconColor="text-amber-600"
+            />
+            <StatCard
+              title="Certificates Ready"
+              count={summary.certificates}
+              href="/dashboard/certificates"
+              icon={Award}
+              iconBg="bg-emerald-50"
+              iconColor="text-emerald-600"
             />
           </div>
         )}

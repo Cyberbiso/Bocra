@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppSelector } from '@/lib/store/hooks'
+import { canReviewTypeApproval } from '@/lib/types/roles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -304,7 +305,7 @@ export default function TypeApprovalDetailPage({
 }) {
   const { id } = use(params)
   const role = useAppSelector((s) => s.role.role)
-  const isStaff = role === 'officer' || role === 'admin'
+  const isStaff = canReviewTypeApproval(role)
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null)
 
   const { data: app, isLoading, isError } = useQuery<ApplicationDetail>({

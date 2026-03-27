@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useAppSelector } from '@/lib/store/hooks'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { canReviewLicensing } from '@/lib/types/roles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -238,15 +239,29 @@ function ActionBtn({
 
 // ─── Licences table ───────────────────────────────────────────────────────────
 
-function LicencesTable({ licences, loading }: { licences: Licence[]; loading: boolean }) {
+function LicencesTable({
+  licences,
+  loading,
+  isStaff = false,
+}: {
+  licences: Licence[]
+  loading: boolean
+  isStaff?: boolean
+}) {
   const cols = 8
   return (
     <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-700">My Licences</h2>
+          <h2 className="text-sm font-semibold text-gray-700">
+            {isStaff ? 'Licence Register' : 'My Licences'}
+          </h2>
           {!loading && (
-            <p className="text-xs text-gray-400 mt-0.5">{licences.length} licence{licences.length !== 1 ? 's' : ''}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {isStaff
+                ? `${licences.length} register ${licences.length === 1 ? 'entry' : 'entries'}`
+                : `${licences.length} ${licences.length === 1 ? 'licence' : 'licences'}`}
+            </p>
           )}
         </div>
         {loading && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
@@ -270,7 +285,14 @@ function LicencesTable({ licences, loading }: { licences: Licence[]; loading: bo
             {loading ? (
               <SkeletonRows cols={cols} />
             ) : licences.length === 0 ? (
-              <EmptyRow cols={cols} message="No licences found. Apply for your first licence above." />
+              <EmptyRow
+                cols={cols}
+                message={
+                  isStaff
+                    ? 'No licence records found in the register.'
+                    : 'No licences found. Apply for your first licence above.'
+                }
+              />
             ) : (
               licences.map((lic) => (
                 <tr key={lic.id} className="hover:bg-gray-50/60 transition-colors group">
@@ -308,22 +330,26 @@ function LicencesTable({ licences, loading }: { licences: Licence[]; loading: bo
                     <div className="flex items-center justify-end gap-1.5">
                       <ActionBtn
                         icon={Eye}
-                        label="View"
+                        label={isStaff ? 'Inspect' : 'View'}
                         href={`/dashboard/licensing/${lic.id}`}
                         variant="primary"
                       />
-                      <ActionBtn
-                        icon={RefreshCw}
-                        label="Renew"
-                        variant="default"
-                        disabled={lic.status !== 'ACTIVE' && lic.status !== 'EXPIRED'}
-                      />
-                      <ActionBtn
-                        icon={FilePen}
-                        label="Amend"
-                        variant="default"
-                        disabled={lic.status !== 'ACTIVE'}
-                      />
+                      {!isStaff && (
+                        <>
+                          <ActionBtn
+                            icon={RefreshCw}
+                            label="Renew"
+                            variant="default"
+                            disabled={lic.status !== 'ACTIVE' && lic.status !== 'EXPIRED'}
+                          />
+                          <ActionBtn
+                            icon={FilePen}
+                            label="Amend"
+                            variant="default"
+                            disabled={lic.status !== 'ACTIVE'}
+                          />
+                        </>
+                      )}
                     </div>
                   </Td>
                 </tr>
@@ -341,18 +367,26 @@ function LicencesTable({ licences, loading }: { licences: Licence[]; loading: bo
 function ApplicationsTable({
   applications,
   loading,
+  isStaff = false,
 }: {
   applications: LicenceApplication[]
   loading: boolean
+  isStaff?: boolean
 }) {
   const cols = 7
   return (
     <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-700">My Applications</h2>
+          <h2 className="text-sm font-semibold text-gray-700">
+            {isStaff ? 'Application Register' : 'My Applications'}
+          </h2>
           {!loading && (
-            <p className="text-xs text-gray-400 mt-0.5">{applications.length} in progress</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {isStaff
+                ? `${applications.length} application ${applications.length === 1 ? 'record' : 'records'}`
+                : `${applications.length} in progress`}
+            </p>
           )}
         </div>
         {loading && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
@@ -375,7 +409,10 @@ function ApplicationsTable({
             {loading ? (
               <SkeletonRows cols={cols} />
             ) : applications.length === 0 ? (
-              <EmptyRow cols={cols} message="No applications in progress." />
+              <EmptyRow
+                cols={cols}
+                message={isStaff ? 'No applications in the register.' : 'No applications in progress.'}
+              />
             ) : (
               applications.map((app) => (
                 <tr key={app.id} className="hover:bg-gray-50/60 transition-colors group">
@@ -398,7 +435,7 @@ function ApplicationsTable({
                   <Td className="text-right">
                     <ActionBtn
                       icon={Eye}
-                      label="View"
+                      label={isStaff ? 'Inspect' : 'View'}
                       href={`/dashboard/licensing/${app.id}`}
                       variant="primary"
                     />
@@ -662,11 +699,16 @@ function ApprovalQueue() {
 
 export default function LicensingPage() {
   const role = useAppSelector((s) => s.role.role)
-  const isStaff = role === 'officer' || role === 'admin'
+  const isStaff = canReviewLicensing(role)
+  const [activeTab, setActiveTab] = useState<'licences' | 'applications' | 'approval'>(isStaff ? 'approval' : 'licences')
 
   const [licences,     setLicences]     = useState<Licence[]>([])
   const [applications, setApplications] = useState<LicenceApplication[]>([])
   const [isLoading,    setIsLoading]    = useState(true)
+
+  useEffect(() => {
+    setActiveTab(isStaff ? 'approval' : 'licences')
+  }, [isStaff])
 
   useEffect(() => {
     let cancelled = false
@@ -722,33 +764,65 @@ export default function LicensingPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Licensing & Spectrum</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Manage licences, track applications, and submit renewal requests.
+            {isStaff
+              ? 'Review licensing submissions, monitor renewals, and manage BOCRA approval workflows.'
+              : 'Manage licences, track applications, and submit renewal requests.'}
           </p>
         </div>
-        <Link
-          href="/dashboard/licensing/apply"
-          className="flex items-center gap-2 px-4 py-2 bg-[#003580] text-white text-sm font-semibold rounded-lg hover:bg-[#002a6b] transition-colors shadow-sm shrink-0"
-        >
-          <PlusCircle className="w-4 h-4" />
-          Apply for New Licence
-        </Link>
+        {isStaff ? (
+          <button
+            type="button"
+            onClick={() => setActiveTab('approval')}
+            className="flex items-center gap-2 px-4 py-2 bg-[#003580] text-white text-sm font-semibold rounded-lg hover:bg-[#002a6b] transition-colors shadow-sm shrink-0"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            Open Approval Queue
+          </button>
+        ) : (
+          <Link
+            href="/dashboard/licensing/apply"
+            className="flex items-center gap-2 px-4 py-2 bg-[#003580] text-white text-sm font-semibold rounded-lg hover:bg-[#002a6b] transition-colors shadow-sm shrink-0"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Apply for New Licence
+          </Link>
+        )}
       </div>
 
-      <Tabs defaultValue="licences">
+      <div className={cn(
+        'rounded-xl border px-5 py-4 flex items-start gap-3',
+        isStaff
+          ? 'border-[#003580]/15 bg-[#003580]/5'
+          : 'border-gray-200 bg-white shadow-sm',
+      )}>
+        <ClipboardList className={cn('w-5 h-5 shrink-0 mt-0.5', isStaff ? 'text-[#003580]' : 'text-gray-400')} />
+        <div>
+          <p className="text-sm font-semibold text-gray-900">
+            {isStaff ? 'BOCRA Licensing Review Workspace' : 'Requestor Licensing Workspace'}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {isStaff
+              ? 'Use the approval queue to review applications, while the other tabs serve as read-only licence and application registers.'
+              : 'Use this area to manage your active licences, follow submitted applications, and prepare renewals before critical expiry dates.'}
+          </p>
+        </div>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'licences' | 'applications' | 'approval')}>
         <TabsList className="border-b border-gray-200 bg-transparent p-0 gap-0 h-auto rounded-none w-full justify-start">
           <TabsTrigger
             value="licences"
             className="rounded-none h-10 px-5 text-sm border-b-2 border-transparent data-[state=active]:border-[#003580] data-[state=active]:text-[#003580] data-[state=active]:font-semibold bg-transparent focus-visible:outline-none"
           >
             <FileText className="w-3.5 h-3.5 mr-1.5" />
-            My Licences
+            {isStaff ? 'Licence Register' : 'My Licences'}
           </TabsTrigger>
           <TabsTrigger
             value="applications"
             className="rounded-none h-10 px-5 text-sm border-b-2 border-transparent data-[state=active]:border-[#003580] data-[state=active]:text-[#003580] data-[state=active]:font-semibold bg-transparent focus-visible:outline-none"
           >
             <ClipboardList className="w-3.5 h-3.5 mr-1.5" />
-            My Applications
+            {isStaff ? 'Application Register' : 'My Applications'}
           </TabsTrigger>
           {isStaff && (
             <TabsTrigger
@@ -756,7 +830,7 @@ export default function LicensingPage() {
               className="rounded-none h-10 px-5 text-sm border-b-2 border-transparent data-[state=active]:border-[#003580] data-[state=active]:text-[#003580] data-[state=active]:font-semibold bg-transparent focus-visible:outline-none"
             >
               <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-              Licence Approvals
+              Approval Queue
             </TabsTrigger>
           )}
         </TabsList>
@@ -766,10 +840,10 @@ export default function LicensingPage() {
           {/* Summary chips */}
           {!isLoading && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatChip label="Active licences"        value={active}   cls="border-emerald-200 bg-emerald-50 text-emerald-800" />
-              <StatChip label="Expiring within 60 days" value={expiring} cls={expiring > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'} />
-              <StatChip label="Critical (≤ 14 days)"   value={critical} cls={critical > 0 ? 'border-red-200 bg-red-50 text-red-800' : 'border-gray-200 bg-gray-50 text-gray-600'} />
-              <StatChip label="Applications in review" value={pending}  cls="border-blue-200 bg-blue-50 text-blue-800" />
+              <StatChip label={isStaff ? 'Active register entries' : 'Active licences'} value={active} cls="border-emerald-200 bg-emerald-50 text-emerald-800" />
+              <StatChip label={isStaff ? 'Expiring within 60 days' : 'Expiring within 60 days'} value={expiring} cls={expiring > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'} />
+              <StatChip label={isStaff ? 'Priority follow-up (≤ 14 days)' : 'Critical (≤ 14 days)'} value={critical} cls={critical > 0 ? 'border-red-200 bg-red-50 text-red-800' : 'border-gray-200 bg-gray-50 text-gray-600'} />
+              <StatChip label={isStaff ? 'Applications awaiting review' : 'Applications in review'} value={pending} cls="border-blue-200 bg-blue-50 text-blue-800" />
             </div>
           )}
 
@@ -779,25 +853,37 @@ export default function LicensingPage() {
               <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-semibold text-red-800">
-                  {critical} licence{critical !== 1 ? 's' : ''} expiring within 14 days
+                  {critical} licence{critical !== 1 ? 's' : ''}{isStaff ? ' in the register' : ''} expiring within 14 days
                 </p>
                 <p className="text-xs text-red-700 mt-0.5">
-                  Renew immediately to avoid service interruption and regulatory non-compliance.
-                  Contact BOCRA on <strong>+267 395 7755</strong> if you need assistance.
+                  {isStaff ? (
+                    <>
+                      These records need renewal follow-up to avoid service interruption and regulatory non-compliance.
+                    </>
+                  ) : (
+                    <>
+                      Renew immediately to avoid service interruption and regulatory non-compliance.
+                      Contact BOCRA on <strong>+267 395 7755</strong> if you need assistance.
+                    </>
+                  )}
                 </p>
               </div>
-              <button className="ml-auto flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-900 shrink-0">
-                Renew now <ChevronRight className="w-3.5 h-3.5" />
+              <button
+                type="button"
+                onClick={() => setActiveTab('licences')}
+                className="ml-auto flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-900 shrink-0"
+              >
+                {isStaff ? 'Open register' : 'Renew now'} <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
 
-          <LicencesTable licences={licences} loading={isLoading} />
+          <LicencesTable licences={licences} loading={isLoading} isStaff={isStaff} />
         </TabsContent>
 
         {/* ── My Applications ───────────────────────────────────────────── */}
         <TabsContent value="applications" className="pt-5">
-          <ApplicationsTable applications={applications} loading={isLoading} />
+          <ApplicationsTable applications={applications} loading={isLoading} isStaff={isStaff} />
         </TabsContent>
 
         {/* ── Licence Approvals (officer / admin) ───────────────────────── */}

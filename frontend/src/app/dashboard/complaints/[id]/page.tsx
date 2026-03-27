@@ -19,6 +19,7 @@ import {
   PhoneCall,
 } from 'lucide-react'
 import { useAppSelector } from '@/lib/store/hooks'
+import { canReviewLicensing } from '@/lib/types/roles'
 import { cn } from '@/lib/utils'
 import type { ComplaintStatus } from '@/app/api/complaints/route'
 
@@ -572,7 +573,7 @@ export default function ComplaintDetailPage({
 }) {
   const { id } = use(params)
   const role = useAppSelector((s) => s.role.role)
-  const isOfficer = role === 'officer' || role === 'admin'
+  const isOfficer = canReviewLicensing(role)
 
   // TODO: Replace with useQuery → GET /api/complaints/${id}
   const caseData = MOCK_CASES[id] ?? FALLBACK_CASE

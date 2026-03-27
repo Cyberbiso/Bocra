@@ -25,6 +25,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useAppSelector } from '@/lib/store/hooks'
+import { canReviewLicensing } from '@/lib/types/roles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -807,7 +808,7 @@ export default function LicensingDetailPage({ params }: { params: Promise<{ id: 
                   <Download className="w-3.5 h-3.5" />
                   Certificate
                 </button>
-                {role === 'officer' || role === 'admin' && (
+                {canReviewLicensing(role) && (
                   <button
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
                     title="Print record"
@@ -827,7 +828,7 @@ export default function LicensingDetailPage({ params }: { params: Promise<{ id: 
         </div>
 
         {/* ── Officer info strip (officer role only, licences only) ───── */}
-        {role === 'officer' || role === 'admin' && lic && (
+        {canReviewLicensing(role) && lic && (
           <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/60 flex flex-wrap items-center gap-x-6 gap-y-1">
             <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">Assigned to</span>
             <span className="flex items-center gap-1.5 text-sm text-gray-700 font-medium">

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
+import { getSessionUserFromRequest } from '@/lib/server-auth'
 import { getSupabaseAdmin } from '@/lib/supabase'
+import { canReviewTypeApproval } from '@/lib/types/roles'
 
 export const runtime = 'nodejs'
 
@@ -102,7 +104,15 @@ const MOCK_QUEUE = [
   },
 ]
 
-export async function GET() {
+export async function GET(request: Request) {
+  const user = await getSessionUserFromRequest(request)
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  }
+  if (!canReviewTypeApproval(user.role)) {
+    return NextResponse.json({ error: 'Type approver or admin role required.' }, { status: 403 })
+  }
+
   const supabase = getSupabaseAdmin()
   if (supabase) {
     try {

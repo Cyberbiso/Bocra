@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { backendFetch } from '@/lib/backend'
+import { getSessionUserFromRequest } from '@/lib/server-auth'
 import { getSupabaseAdmin } from '@/lib/supabase'
+import { canReviewLicensing } from '@/lib/types/roles'
 
 export const runtime = 'nodejs'
 
@@ -32,6 +35,69 @@ const MOCK_APPLICATIONS = [
   { id: 'a4', application_number: 'APP-2024-01841', license_type: 'Broadcasting Licence — TV',                category: 'Broadcasting',       status_code: 'REJECTED',         submitted_date: '2024-11-15', updated_at: '2025-02-28' },
 ]
 
+function mapBackendLicence(record: {
+  id: string
+  licenceNumber: string
+  licenceType: string
+  category: string
+  status: string
+  issueDate: string
+  expiryDate: string
+}) {
+  return {
+    id: record.id,
+    license_number: record.licenceNumber,
+    license_type: record.licenceType,
+    category: record.category,
+    status_code: record.status,
+    issue_date: record.issueDate,
+    expiry_date: record.expiryDate,
+  }
+}
+
+function mapBackendApplication(record: {
+  id: string
+  applicationNumber: string
+  licenceType: string
+  applicantName: string
+  applicantEmail: string
+  status: string
+  submittedDate: string
+  stage?: string
+}) {
+  return {
+    id: record.id,
+    application_number: record.applicationNumber,
+    license_type: record.licenceType,
+    category: record.licenceType,
+    org_name: record.applicantName,
+    contact_email: record.applicantEmail,
+    status_code: record.status,
+    submitted_date: record.submittedDate,
+    updated_at: record.submittedDate,
+    coverage_area: '',
+    technical_details: '',
+    stage_code: record.stage ?? '',
+  }
+}
+
+async function backendRouteFetch(
+  request: Request,
+  path: string,
+  init: RequestInit = {},
+) {
+  const cookieHeader = request.headers.get('cookie') ?? ''
+  const headers = new Headers(init.headers)
+  if (cookieHeader && !headers.has('cookie')) {
+    headers.set('cookie', cookieHeader)
+  }
+  return backendFetch(path, {
+    ...init,
+    headers,
+    cache: 'no-store',
+  })
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
@@ -46,6 +112,16 @@ export async function GET(request: NextRequest) {
 
   // ── License types ──────────────────────────────────────────────────────────
   if (action === 'types') {
+    try {
+      const upstream = await backendRouteFetch(request, '/api/licenses?action=types')
+      if (upstream.ok) {
+        const data = await upstream.json()
+        return NextResponse.json({ data })
+      }
+    } catch {
+      // Fall back to direct reads below.
+    }
+
     if (supabase) {
       try {
         const { data, error } = await supabase
@@ -63,6 +139,31 @@ export async function GET(request: NextRequest) {
 
   // ── License list ───────────────────────────────────────────────────────────
   if (action === 'list') {
+    try {
+      const upstream = await backendRouteFetch(request, '/api/licenses')
+      if (upstream.ok) {
+        const payload = await upstream.json()
+        const licences = Array.isArray(payload?.licences) ? payload.licences.map(mapBackendLicence) : []
+        const filtered = licences.filter((licence: { status_code: string; license_number: string; license_type: string; category: string }) => {
+          const matchStatus = !status || licence.status_code === status
+          const loweredSearch = search.toLowerCase()
+          const matchSearch = !search ||
+            licence.license_number.toLowerCase().includes(loweredSearch) ||
+            licence.license_type.toLowerCase().includes(loweredSearch) ||
+            licence.category.toLowerCase().includes(loweredSearch)
+          return matchStatus && matchSearch
+        })
+        const start = (page - 1) * pageSize
+        const paged = filtered.slice(start, start + pageSize)
+        return NextResponse.json({
+          data: paged,
+          meta: { total: filtered.length, page, pageSize },
+        })
+      }
+    } catch {
+      // Fall back to direct reads below.
+    }
+
     if (supabase) {
       try {
         let q = supabase
@@ -104,6 +205,28 @@ export async function GET(request: NextRequest) {
   if (action === 'applications') {
     const orgId = searchParams.get('orgId') ?? ''
 
+    try {
+      const params = new URLSearchParams()
+      if (status) params.set('status', status)
+      if (search) params.set('q', search)
+      params.set('page', String(page))
+      params.set('size', String(pageSize))
+
+      const upstream = await backendRouteFetch(
+        request,
+        `/api/licence-applications?${params.toString()}`,
+      )
+      if (upstream.ok) {
+        const payload = await upstream.json()
+        return NextResponse.json({
+          data: Array.isArray(payload?.data) ? payload.data.map(mapBackendApplication) : [],
+          meta: payload?.meta ?? { total: 0, page, pageSize },
+        })
+      }
+    } catch {
+      // Fall back to direct reads below.
+    }
+
     if (supabase) {
       try {
         let q = supabase
@@ -126,7 +249,35 @@ export async function GET(request: NextRequest) {
 
   // ── Review queue (officer / admin) ────────────────────────────────────────
   if (action === 'review') {
+    const user = await getSessionUserFromRequest(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+    }
+    if (!canReviewLicensing(user.role)) {
+      return NextResponse.json({ error: 'Officer or admin role required.' }, { status: 403 })
+    }
+
     const statusFilter = searchParams.get('status') ?? ''
+
+    try {
+      const params = new URLSearchParams()
+      if (statusFilter) params.set('status', statusFilter)
+      params.set('page', '1')
+      params.set('size', '100')
+
+      const upstream = await backendRouteFetch(
+        request,
+        `/api/licence-applications?${params.toString()}`,
+      )
+      if (upstream.ok) {
+        const payload = await upstream.json()
+        return NextResponse.json({
+          data: Array.isArray(payload?.data) ? payload.data.map(mapBackendApplication) : [],
+        })
+      }
+    } catch {
+      // Fall back to direct reads below.
+    }
 
     if (supabase) {
       try {
@@ -169,6 +320,27 @@ export async function POST(request: Request) {
 
   // ── Submit new application ─────────────────────────────────────────────────
   if (action === 'submit') {
+    try {
+      const upstream = await backendRouteFetch(request, '/api/licence-applications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category: body.category ?? '',
+          licenceType: body.licenceType ?? '',
+          applicantName: body.orgName ?? body.contactName ?? '',
+          applicantEmail: body.contactEmail ?? '',
+          coverageArea: body.coverageArea ?? null,
+          formData: body,
+        }),
+      })
+      if (upstream.ok) {
+        const data = await upstream.json()
+        return NextResponse.json(data, { status: upstream.status })
+      }
+    } catch {
+      // Fall back to legacy path below.
+    }
+
     const year   = new Date().getFullYear()
     const serial = String(Math.floor(Math.random() * 90000) + 10000)
     const applicationNumber = `APP-${year}-${serial}`
@@ -210,8 +382,39 @@ export async function POST(request: Request) {
 
   // ── Update application status (officer / admin) ────────────────────────────
   if (action === 'updateStatus') {
+    const user = await getSessionUserFromRequest(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+    }
+    if (!canReviewLicensing(user.role)) {
+      return NextResponse.json({ error: 'Officer or admin role required.' }, { status: 403 })
+    }
+
     const { id, status_code, notes } = body
     if (!id || !status_code) return NextResponse.json({ error: 'id and status_code required' }, { status: 400 })
+
+    const actionMap: Record<string, 'approve' | 'reject' | 'remand'> = {
+      APPROVED: 'approve',
+      REJECTED: 'reject',
+      UNDER_REVIEW: 'remand',
+      PENDING: 'remand',
+    }
+
+    const backendAction = actionMap[status_code]
+    if (backendAction) {
+      try {
+        const upstream = await backendRouteFetch(request, `/api/licence-applications/${id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: backendAction, note: notes ?? '' }),
+        })
+        if (upstream.ok) {
+          return NextResponse.json({ success: true })
+        }
+      } catch {
+        // Fall back to legacy path below.
+      }
+    }
 
     if (supabase) {
       try {

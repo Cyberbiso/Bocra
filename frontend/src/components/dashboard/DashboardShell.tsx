@@ -15,6 +15,7 @@ import { useAppDispatch } from '@/lib/store/hooks'
 import { fetchMe } from '@/lib/store/slices/authSlice'
 import { disableDemo } from '@/lib/store/slices/demoSlice'
 import { setRole } from '@/lib/store/slices/roleSlice'
+import { isRole } from '@/lib/types/roles'
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
@@ -26,7 +27,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
     dispatch(fetchMe()).then((action) => {
       if (fetchMe.fulfilled.match(action)) {
         const role = action.payload.role
-        if (role === 'officer' || role === 'admin' || role === 'applicant') {
+        if (isRole(role)) {
           dispatch(setRole(role))
         }
       }

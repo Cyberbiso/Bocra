@@ -1,11 +1,12 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit'
+import type { Role } from '@/lib/types/roles'
 
 export interface AuthUser {
   id: string
   email: string
   firstName: string
   lastName: string
-  role: string
+  role: Role
   orgId: string | null
   orgName: string | null
   org: {

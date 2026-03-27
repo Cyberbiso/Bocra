@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useRef, useState } from 'react'
+import { useAppSelector } from '@/lib/store/hooks'
 import {
   Search,
   CheckCircle2,
@@ -19,6 +20,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { isBocraStaff } from '@/lib/types/roles'
 import type { ImeiStatus, VerificationResult } from '@/app/api/device-verification/route'
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -158,12 +160,16 @@ function ImeiInput({
   onSubmit,
   loading,
   error,
+  ctaLabel = 'Check IMEI',
+  helperText = 'Dial *#06# on the device to find its IMEI.',
 }: {
   value: string
   onChange: (v: string) => void
   onSubmit: () => void
   loading: boolean
   error?: string
+  ctaLabel?: string
+  helperText?: string
 }) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') onSubmit()
@@ -213,7 +219,13 @@ function ImeiInput({
       )}
 
       <p className="text-xs text-gray-400">
-        Dial <code className="bg-gray-100 px-1 rounded">*#06#</code> on the device to find its IMEI.
+        {helperText.includes('*#06#') ? (
+          <>
+            Dial <code className="bg-gray-100 px-1 rounded">*#06#</code> on the device to find its IMEI.
+          </>
+        ) : (
+          helperText
+        )}
       </p>
 
       <button
@@ -227,9 +239,9 @@ function ImeiInput({
         )}
       >
         {loading ? (
-          <><Loader2 className="w-4 h-4 animate-spin" />Checking…</>
+          <><Loader2 className="w-4 h-4 animate-spin" />{ctaLabel === 'Screen IMEI' ? 'Screening…' : 'Checking…'}</>
         ) : (
-          <><Search className="w-4 h-4" />Check IMEI</>
+          <><Search className="w-4 h-4" />{ctaLabel}</>
         )}
       </button>
     </div>
@@ -238,7 +250,7 @@ function ImeiInput({
 
 // ─── Single result card ───────────────────────────────────────────────────────
 
-function ResultCard({ result }: { result: VerificationResult }) {
+function ResultCard({ result, isStaff = false }: { result: VerificationResult; isStaff?: boolean }) {
   const { rowCls } = STATUS_CONFIG[result.status]
 
   const handleDownloadCert = () => {
@@ -320,7 +332,7 @@ function ResultCard({ result }: { result: VerificationResult }) {
             className="w-full flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
-            Download Verification Certificate
+            {isStaff ? 'Export Verification Record' : 'Download Verification Certificate'}
           </button>
         )}
       </div>
@@ -352,7 +364,7 @@ function HistoryChip({
 
 // ─── Left panel — Single IMEI lookup ─────────────────────────────────────────
 
-function SingleLookupPanel() {
+function SingleLookupPanel({ isStaff = false }: { isStaff?: boolean }) {
   const [imei, setImei]       = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult]   = useState<VerificationResult | null>(null)
@@ -388,9 +400,13 @@ function SingleLookupPanel() {
     <div className="flex flex-col gap-4">
       {/* Panel header */}
       <div>
-        <h2 className="text-sm font-semibold text-gray-700">Single IMEI Lookup</h2>
+        <h2 className="text-sm font-semibold text-gray-700">
+          {isStaff ? 'Investigation Lookup' : 'Single IMEI Lookup'}
+        </h2>
         <p className="text-xs text-gray-400 mt-0.5">
-          Check whether a device is approved for use in Botswana.
+          {isStaff
+            ? 'Screen a single device record during inspections, complaints, or enforcement follow-up.'
+            : 'Check whether a device is approved for use in Botswana.'}
         </p>
       </div>
 
@@ -400,15 +416,23 @@ function SingleLookupPanel() {
         onSubmit={handleCheck}
         loading={loading}
         error={error}
+        ctaLabel={isStaff ? 'Screen IMEI' : 'Check IMEI'}
+        helperText={
+          isStaff
+            ? 'Use the device label, handset dial code, or consignment paperwork to capture the IMEI before screening.'
+            : 'Dial *#06# on the device to find its IMEI.'
+        }
       />
 
       {/* Result */}
-      {result && <ResultCard result={result} />}
+      {result && <ResultCard result={result} isStaff={isStaff} />}
 
       {/* Session history */}
       {history.length > 0 && (
         <div>
-          <p className="text-xs text-gray-400 mb-2">Recent lookups this session</p>
+          <p className="text-xs text-gray-400 mb-2">
+            {isStaff ? 'Recent screenings this session' : 'Recent lookups this session'}
+          </p>
           <div className="flex flex-wrap gap-1.5">
             {history.map((h) => (
               <HistoryChip
@@ -592,7 +616,7 @@ function BatchTable({
 
 // ─── Right panel — Batch CSV ──────────────────────────────────────────────────
 
-function BatchPanel() {
+function BatchPanel({ isStaff = false }: { isStaff?: boolean }) {
   const [fileName, setFileName]       = useState<string | null>(null)
   const [parsedImeis, setParsed]      = useState<string[]>([])
   const [results, setResults]         = useState<VerificationResult[]>([])
@@ -665,9 +689,13 @@ function BatchPanel() {
       {/* Panel header */}
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-gray-700">Batch CSV Upload</h2>
+          <h2 className="text-sm font-semibold text-gray-700">
+            {isStaff ? 'Consignment Batch Screening' : 'Batch CSV Upload'}
+          </h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            Verify up to 500 IMEIs at once from a CSV file.
+            {isStaff
+              ? 'Screen up to 500 IMEIs from import lists or enforcement case files in one pass.'
+              : 'Verify up to 500 IMEIs at once from a CSV file.'}
           </p>
         </div>
         <button
@@ -675,7 +703,7 @@ function BatchPanel() {
           className="flex items-center gap-1.5 text-xs font-medium text-[#003580] hover:text-[#002a6b] transition-colors whitespace-nowrap shrink-0"
         >
           <FileDown className="w-3.5 h-3.5" />
-          Download template
+          {isStaff ? 'Download screening template' : 'Download template'}
         </button>
       </div>
 
@@ -707,7 +735,9 @@ function BatchPanel() {
           {submitting ? (
             <><Loader2 className="w-4 h-4 animate-spin" />Processing {parsedImeis.length} IMEI{parsedImeis.length !== 1 ? 's' : ''}…</>
           ) : (
-            <>Submit Batch ({parsedImeis.length} IMEI{parsedImeis.length !== 1 ? 's' : ''})</>
+            <>
+              {isStaff ? 'Run Screening Batch' : 'Submit Batch'} ({parsedImeis.length} IMEI{parsedImeis.length !== 1 ? 's' : ''})
+            </>
           )}
         </button>
       )}
@@ -755,7 +785,7 @@ function BatchPanel() {
               className="flex-1 flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
             >
               <FileDown className="w-3.5 h-3.5" />
-              Download Results CSV
+              {isStaff ? 'Download Screening Results' : 'Download Results CSV'}
             </button>
             <button
               onClick={handleDownloadCerts}
@@ -767,7 +797,7 @@ function BatchPanel() {
               )}
             >
               <Download className="w-3.5 h-3.5" />
-              Download Certificate ({stats.verified})
+              {isStaff ? 'Download Clearance Certificate' : 'Download Certificate'} ({stats.verified})
             </button>
           </div>
 
@@ -781,7 +811,7 @@ function BatchPanel() {
             }}
             className="w-full text-xs text-gray-400 hover:text-gray-600 transition-colors py-1"
           >
-            Clear and upload another file
+            {isStaff ? 'Clear screening batch and upload another file' : 'Clear and upload another file'}
           </button>
         </div>
       )}
@@ -792,14 +822,21 @@ function BatchPanel() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DeviceVerificationPage() {
+  const role = useAppSelector((s) => s.role.role)
+  const isStaff = isBocraStaff(role)
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
 
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Device Verification</h1>
+        <h1 className="text-2xl font-bold text-gray-900">
+          {isStaff ? 'Device Verification & IMEI Screening' : 'Device Verification'}
+        </h1>
         <p className="text-sm text-gray-500 mt-1">
-          Verify device IMEI numbers against the BOCRA Type Approval registry.
+          {isStaff
+            ? 'Use the BOCRA verification desk tools to screen consignments, investigate flagged devices, and export verification outputs.'
+            : 'Verify device IMEI numbers against the BOCRA Type Approval registry.'}
         </p>
       </div>
 
@@ -807,13 +844,37 @@ export default function DeviceVerificationPage() {
       <div className="flex items-start gap-3 rounded-xl border border-[#003580]/15 bg-[#003580]/4 px-4 py-3.5">
         <AlertCircle className="w-4 h-4 text-[#003580] shrink-0 mt-0.5" />
         <p className="text-xs text-gray-600 leading-relaxed">
-          <strong className="text-[#003580]">How to test:</strong>
-          {' '}IMEIs starting with <code className="bg-white border border-gray-200 px-1 rounded font-mono">35</code> return <strong>VERIFIED</strong> &nbsp;·&nbsp;
-          <code className="bg-white border border-gray-200 px-1 rounded font-mono">52</code> → <strong>BLACKLISTED</strong> &nbsp;·&nbsp;
-          <code className="bg-white border border-gray-200 px-1 rounded font-mono">01</code> → <strong>BLOCKED</strong> &nbsp;·&nbsp;
-          <code className="bg-white border border-gray-200 px-1 rounded font-mono">99</code> → <strong>DUPLICATE</strong> &nbsp;·&nbsp;
-          <code className="bg-white border border-gray-200 px-1 rounded font-mono">77</code> → <strong>FAILED</strong>
+          {isStaff ? (
+            <>
+              <strong className="text-[#003580]">Verification desk mode:</strong>{' '}
+              use single lookups for case-by-case investigations, batch screening for import consignments, and export the results for compliance follow-up or certificate generation.
+            </>
+          ) : (
+            <>
+              <strong className="text-[#003580]">Before you import or buy:</strong>{' '}
+              check a single handset IMEI or upload a CSV batch to confirm whether devices are approved for use in Botswana.
+            </>
+          )}
         </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {(isStaff
+          ? [
+              { label: 'Desk Workflow', value: 'Single-case screening', accent: 'border-blue-200 bg-blue-50 text-blue-800' },
+              { label: 'Bulk Workflow', value: 'Import batch verification', accent: 'border-amber-200 bg-amber-50 text-amber-800' },
+              { label: 'Outputs', value: 'Results CSV and certificates', accent: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
+            ]
+          : [
+              { label: 'Single Check', value: 'Verify one device by IMEI', accent: 'border-blue-200 bg-blue-50 text-blue-800' },
+              { label: 'Batch Check', value: 'Upload a CSV for multiple IMEIs', accent: 'border-amber-200 bg-amber-50 text-amber-800' },
+              { label: 'Verified Devices', value: 'Download a verification certificate', accent: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
+            ]).map((card) => (
+          <div key={card.label} className={cn('rounded-xl border px-4 py-3.5', card.accent)}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide">{card.label}</p>
+            <p className="text-sm font-semibold text-gray-900 mt-1">{card.value}</p>
+          </div>
+        ))}
       </div>
 
       {/* Two-panel grid */}
@@ -821,12 +882,12 @@ export default function DeviceVerificationPage() {
 
         {/* Left — Single lookup */}
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5">
-          <SingleLookupPanel />
+          <SingleLookupPanel isStaff={isStaff} />
         </div>
 
         {/* Right — Batch */}
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5">
-          <BatchPanel />
+          <BatchPanel isStaff={isStaff} />
         </div>
 
       </div>

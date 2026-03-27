@@ -1,9 +1,19 @@
 import { NextResponse } from 'next/server'
+import { getSessionUserFromRequest } from '@/lib/server-auth'
+import { canReviewTypeApproval } from '@/lib/types/roles'
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await getSessionUserFromRequest(request)
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  }
+  if (!canReviewTypeApproval(user.role)) {
+    return NextResponse.json({ error: 'Type approver or admin role required.' }, { status: 403 })
+  }
+
   const { id } = await params
   const body = await request.json().catch(() => null)
 

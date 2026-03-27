@@ -31,6 +31,7 @@ import {
   patchComplaintStatus,
   setStatusOverride,
 } from '@/lib/store/slices/complaintsSlice'
+import { canReviewLicensing } from '@/lib/types/roles'
 import { cn } from '@/lib/utils'
 import ComplaintDialog from '@/components/dashboard/complaints/ComplaintDialog'
 import type {
@@ -521,7 +522,7 @@ function FilterBar({
 
 export default function ComplaintsPage() {
   const role = useAppSelector((s) => s.role.role)
-  const isOfficer = role === 'officer' || role === 'admin'
+  const isOfficer = canReviewLicensing(role)
 
   const dispatch = useAppDispatch()
   const isDemo = useAppSelector((s) => s.demo.isDemo)

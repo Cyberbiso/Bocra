@@ -3,13 +3,20 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks'
-import { fetchApplications, fetchAccreditations, DEMO_REGISTRATION } from '@/lib/store/slices/typeApprovalSlice'
+import {
+  fetchApplications,
+  fetchAccreditations,
+  fetchReviewQueue,
+  DEMO_REGISTRATION,
+  type ReviewApplication,
+} from '@/lib/store/slices/typeApprovalSlice'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useQuery } from '@tanstack/react-query'
 import { QRCodeSVG } from 'qrcode.react'
 import { format } from 'date-fns'
+import { canReviewTypeApproval } from '@/lib/types/roles'
 import {
   ShieldCheck,
   Plus,
@@ -215,6 +222,123 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   )
 }
 
+const REVIEW_STATUS_STYLES: Record<string, string> = {
+  PENDING: 'bg-amber-100 text-amber-700 border-amber-200',
+  VALIDATED: 'bg-blue-100 text-blue-700 border-blue-200',
+  REMANDED: 'bg-orange-100 text-orange-700 border-orange-200',
+  APPROVED: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+}
+
+function ReviewStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border whitespace-nowrap',
+        REVIEW_STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-700 border-slate-200',
+      )}
+    >
+      {status.replace(/_/g, ' ')}
+    </span>
+  )
+}
+
+function fmtStage(code: string) {
+  return code
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+    .join(' ')
+}
+
+function ReviewQueueTable({
+  items,
+  loading,
+  emptyMessage,
+}: {
+  items: ReviewApplication[]
+  loading: boolean
+  emptyMessage: string
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[1, 2, 3, 4].map((row) => (
+          <Skeleton key={row} className="h-14 w-full rounded-xl" />
+        ))}
+      </div>
+    )
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-14 flex flex-col items-center text-center gap-3">
+        <ClipboardList className="w-10 h-10 text-gray-300" />
+        <div>
+          <p className="text-sm font-semibold text-gray-800">Review queue is clear</p>
+          <p className="text-xs text-gray-500 mt-1">{emptyMessage}</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100">
+              {['Application', 'Requestor', 'Stage', 'Status', 'Due', 'Actions'].map((heading) => (
+                <th
+                  key={heading}
+                  className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                >
+                  {heading}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {items.map((app) => (
+              <tr key={app.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-5 py-3.5">
+                  <p className="font-mono text-xs text-[#003580] font-medium">{app.application_number}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {app.device_catalog.brand_name} {app.device_catalog.model_name}
+                  </p>
+                </td>
+                <td className="px-5 py-3.5 text-xs text-gray-600">{app.applicant_org.legal_name}</td>
+                <td className="px-5 py-3.5 text-xs text-gray-600 whitespace-nowrap">{fmtStage(app.current_stage_code)}</td>
+                <td className="px-5 py-3.5">
+                  <ReviewStatusBadge status={app.current_status_code} />
+                </td>
+                <td className="px-5 py-3.5 text-xs text-gray-500 whitespace-nowrap">{fmtDate(app.expected_decision_at)}</td>
+                <td className="px-5 py-3.5">
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/dashboard/type-approval/${app.id}`}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-[#003580] border border-[#003580]/20 rounded-lg hover:bg-[#003580]/5 transition-colors whitespace-nowrap"
+                    >
+                      <Eye className="w-3 h-3" />
+                      Open
+                    </Link>
+                    <Link
+                      href="/dashboard/certificates"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap"
+                    >
+                      Review Tools
+                      <ChevronRight className="w-3 h-3" />
+                    </Link>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   return (
     <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-gray-900 text-white text-sm px-4 py-3 rounded-xl shadow-xl">
@@ -326,15 +450,23 @@ function CertificateDialog({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-type TabId = 'overview' | 'search' | 'register'
+type TabId = 'overview' | 'search' | 'register' | 'review'
 
 export default function TypeApprovalPage() {
   const role = useAppSelector((s) => s.role.role)
-  const isStaff = role === 'officer' || role === 'admin'
+  const isStaff = canReviewTypeApproval(role)
 
   const dispatch = useAppDispatch()
   const isDemo = useAppSelector((s) => s.demo.isDemo)
-  const { applications: rawApplications, applicationsLoading, registration: storedReg, accreditations, accreditationsLoading } = useAppSelector((s) => s.typeApproval)
+  const {
+    applications: rawApplications,
+    applicationsLoading,
+    registration: storedReg,
+    accreditations,
+    accreditationsLoading,
+    reviewQueue,
+    reviewQueueLoading,
+  } = useAppSelector((s) => s.typeApproval)
 
   // Use stored registration from Redux, or demo fallback
   const MOCK_REGISTRATION = storedReg ?? DEMO_REGISTRATION
@@ -342,7 +474,10 @@ export default function TypeApprovalPage() {
   useEffect(() => {
     dispatch(fetchApplications({ status: 'ALL', page: 1 }))
     dispatch(fetchAccreditations())
-  }, [dispatch, isDemo])
+    if (isStaff) {
+      dispatch(fetchReviewQueue())
+    }
+  }, [dispatch, isDemo, isStaff])
 
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<TabId>('overview')
@@ -370,6 +505,25 @@ export default function TypeApprovalPage() {
     approved:  allApplications.filter((a) => a.status === 'APPROVED').length,
     attention: allApplications.filter((a) => a.status === 'REJECTED' || a.status === 'MORE_INFO').length,
   }
+
+  const reviewStats = {
+    total: reviewQueue.length,
+    pending: reviewQueue.filter((item) => item.current_status_code === 'PENDING').length,
+    validated: reviewQueue.filter((item) => item.current_status_code === 'VALIDATED').length,
+    remanded: reviewQueue.filter((item) => item.current_status_code === 'REMANDED').length,
+  }
+
+  const visibleTabs: { id: TabId; label: string }[] = isStaff
+    ? [
+        { id: 'overview', label: 'Reviewer Overview' },
+        { id: 'review', label: 'Review Queue' },
+        { id: 'search', label: 'Search Register' },
+      ]
+    : [
+        { id: 'overview', label: 'Overview' },
+        { id: 'search', label: 'Search Equipment' },
+        { id: 'register', label: 'Register' },
+      ]
 
   const _ = applicationsLoading // referenced to avoid lint warning
 
@@ -459,11 +613,20 @@ export default function TypeApprovalPage() {
             <h1 className="text-2xl font-bold text-gray-900">Type Approval</h1>
           </div>
           <p className="text-sm text-gray-500 max-w-2xl">
-            Manage type approval applications for telecommunications equipment sold or used in Botswana.
-            All devices that connect to a public network must hold a valid BOCRA type approval certificate.
+            {isStaff
+              ? 'Review device submissions, monitor the BOCRA approval queue, and progress records toward invoice and certificate issuance.'
+              : 'Manage type approval applications for telecommunications equipment sold or used in Botswana. All devices that connect to a public network must hold a valid BOCRA type approval certificate.'}
           </p>
         </div>
-        {MOCK_REGISTRATION.registered && (
+        {isStaff ? (
+          <button
+            onClick={() => setActiveTab('review')}
+            className="flex items-center gap-2 shrink-0 px-4 py-2.5 bg-[#003580] text-white text-sm font-semibold rounded-lg hover:bg-[#002a6e] transition-colors shadow-sm"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Open Review Queue
+          </button>
+        ) : MOCK_REGISTRATION.registered && (
           <button
             onClick={() => setActiveTab('search')}
             title="You must search for the equipment model first before starting a new application"
@@ -477,11 +640,7 @@ export default function TypeApprovalPage() {
 
       {/* ── Tab strip ────────────────────────────────────────────────────── */}
       <div className="flex gap-1 border-b border-gray-200">
-        {([
-          { id: 'overview',  label: 'Overview'          },
-          { id: 'search',    label: 'Search Equipment'  },
-          { id: 'register',  label: 'Register'          },
-        ] as { id: TabId; label: string }[]).map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -505,16 +664,30 @@ export default function TypeApprovalPage() {
 
           {/* Workflow steps */}
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-5 py-5">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4">
-              Type Approval Workflow
-            </p>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">
+                {isStaff ? 'Reviewer Workflow' : 'Type Approval Workflow'}
+              </p>
+              {isStaff && (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#003580]/8 text-[#003580] border border-[#003580]/15 uppercase tracking-wide">
+                  BOCRA Reviewer Workspace
+                </span>
+              )}
+            </div>
             <div className="flex flex-col sm:flex-row gap-4 sm:gap-0">
-              {[
-                { step: 1, title: 'Register Organisation', desc: 'Register as a Type Approval Requestor and submit supporting documents.', tabTarget: 'register' as TabId, icon: Building2, done: MOCK_REGISTRATION.registered },
-                { step: 2, title: 'Search Equipment',      desc: 'Check if the equipment model already has an approved Type Approval.',    tabTarget: 'search'   as TabId, icon: Search,    done: false },
-                { step: 3, title: 'Submit Application',    desc: 'Provide device details, upload test reports and pay the assessment fee.', tabTarget: 'search'   as TabId, icon: FileText,  done: stats.approved > 0 },
-                { step: 4, title: 'Receive Certificate',   desc: 'Download your Type Approval Certificate once the application is approved.',tabTarget: null,               icon: ShieldCheck,done: false },
-              ].map((item, i) => {
+              {(isStaff
+                ? [
+                    { step: 1, title: 'Receive Submissions', desc: 'Monitor newly submitted device applications from accredited requestors.', tabTarget: 'review' as TabId, icon: ClipboardList, done: reviewStats.total > 0 },
+                    { step: 2, title: 'Validate Documents', desc: 'Check reports, completeness, and device evidence before progressing a file.', tabTarget: 'review' as TabId, icon: FileText, done: reviewStats.pending === 0 && reviewStats.total > 0 },
+                    { step: 3, title: 'Approve or Remand', desc: 'Advance compliant applications and return incomplete ones for correction.', tabTarget: 'review' as TabId, icon: CheckCircle2, done: reviewStats.validated > 0 || reviewStats.remanded > 0 },
+                    { step: 4, title: 'Issue Certificate', desc: 'Hand approved records over to billing and certificate issuance.', tabTarget: 'review' as TabId, icon: ShieldCheck, done: stats.approved > 0 },
+                  ]
+                : [
+                    { step: 1, title: 'Register Organisation', desc: 'Register as a Type Approval Requestor and submit supporting documents.', tabTarget: 'register' as TabId, icon: Building2, done: MOCK_REGISTRATION.registered },
+                    { step: 2, title: 'Search Equipment', desc: 'Check if the equipment model already has an approved Type Approval.', tabTarget: 'search' as TabId, icon: Search, done: false },
+                    { step: 3, title: 'Submit Application', desc: 'Provide device details, upload test reports and pay the assessment fee.', tabTarget: 'search' as TabId, icon: FileText, done: stats.approved > 0 },
+                    { step: 4, title: 'Receive Certificate', desc: 'Download your Type Approval Certificate once the application is approved.', tabTarget: null, icon: ShieldCheck, done: false },
+                  ]).map((item, i) => {
                 const Icon = item.icon
                 return (
                   <div key={i} className="flex sm:flex-col sm:flex-1 items-start sm:items-center gap-4 sm:gap-2 sm:text-center">
@@ -535,7 +708,7 @@ export default function TypeApprovalPage() {
                           onClick={() => setActiveTab(item.tabTarget!)}
                           className="inline-flex items-center gap-1 text-xs text-[#003580] font-medium mt-1.5 hover:underline"
                         >
-                          {item.done ? 'View details' : 'Get started'}
+                          {isStaff ? 'Open queue' : item.done ? 'View details' : 'Get started'}
                           <ChevronRight className="w-3 h-3" />
                         </button>
                       ) : (
@@ -606,11 +779,12 @@ export default function TypeApprovalPage() {
 
           {/* Staff quick-action cards */}
           {isStaff && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
               {[
-                { icon: ClipboardList, label: 'Review Queue',       value: `${stats.pending} awaiting review`,   accent: 'border-amber-200 bg-amber-50',   iconCls: 'text-amber-600'  },
-                { icon: AlertCircle,  label: 'Needs Attention',     value: `${stats.attention} requiring action`,accent: 'border-red-200 bg-red-50',       iconCls: 'text-red-500'    },
-                { icon: CheckCircle2, label: 'Approved This Month', value: `${stats.approved} certificates issued`,accent: 'border-emerald-200 bg-emerald-50',iconCls: 'text-emerald-600'},
+                { icon: ClipboardList, label: 'Review Queue', value: `${reviewStats.total} in queue`, accent: 'border-amber-200 bg-amber-50', iconCls: 'text-amber-600' },
+                { icon: FileText, label: 'Pending Checks', value: `${reviewStats.pending} awaiting validation`, accent: 'border-blue-200 bg-blue-50', iconCls: 'text-blue-600' },
+                { icon: AlertCircle, label: 'Remanded Cases', value: `${reviewStats.remanded} sent back`, accent: 'border-red-200 bg-red-50', iconCls: 'text-red-500' },
+                { icon: CheckCircle2, label: 'Ready Decisions', value: `${reviewStats.validated} ready to approve`, accent: 'border-emerald-200 bg-emerald-50', iconCls: 'text-emerald-600' },
               ].map((card) => {
                 const Icon = card.icon
                 return (
@@ -750,15 +924,64 @@ export default function TypeApprovalPage() {
             <div className="bg-gray-50 border border-gray-200 rounded-xl px-5 py-4 flex items-start gap-3">
               <Lock className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
               <p className="text-xs text-gray-500">
-                As a BOCRA staff member you have read access to all type approval records.
+                This reviewer view is only shown to BOCRA type approvers and admins.
                 Use the{' '}
-                <Link href="/dashboard/admin" className="text-[#003580] underline underline-offset-2">
-                  Admin & Workflow
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('review')}
+                  className="text-[#003580] underline underline-offset-2"
+                >
+                  Review Queue
+                </button>{' '}
+                tab for triage and the{' '}
+                <Link href="/dashboard/certificates" className="text-[#003580] underline underline-offset-2">
+                  Certificates & Registers
                 </Link>{' '}
-                module to manage assignments, set priorities, and approve or reject applications.
+                page for the current assignment and review tools.
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          TAB: REVIEW QUEUE
+      ══════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'review' && isStaff && (
+        <div className="space-y-5">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-5 py-5">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">
+                  Reviewer Queue
+                </p>
+                <h2 className="text-lg font-semibold text-gray-900">BOCRA Type Approval Review Workspace</h2>
+                <p className="text-sm text-gray-500 mt-1 max-w-2xl">
+                  Applicants do not see this tab. It is reserved for BOCRA type approvers and admins reviewing device submissions.
+                </p>
+              </div>
+              <Link
+                href="/dashboard/certificates"
+                className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-200 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap"
+              >
+                Open Full Review Tools
+                <ChevronRight className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="In Queue" value={reviewStats.total} color="bg-[#003580]" />
+            <StatCard label="Pending Check" value={reviewStats.pending} color="bg-amber-400" />
+            <StatCard label="Decision Ready" value={reviewStats.validated} color="bg-emerald-500" />
+            <StatCard label="Remanded" value={reviewStats.remanded} color="bg-red-500" />
+          </div>
+
+          <ReviewQueueTable
+            items={reviewQueue}
+            loading={reviewQueueLoading}
+            emptyMessage="There are no pending type approval review items right now."
+          />
         </div>
       )}
 
@@ -767,6 +990,15 @@ export default function TypeApprovalPage() {
       ══════════════════════════════════════════════════════════════════ */}
       {activeTab === 'search' && (
         <div className="space-y-5">
+
+          {isStaff && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3.5 flex items-start gap-3">
+              <Info className="w-4 h-4 text-[#003580] shrink-0 mt-0.5" />
+              <p className="text-sm text-blue-900">
+                Reviewer mode can still search the public type approval register, but requestor registration and new application submission belong to the applicant workflow.
+              </p>
+            </div>
+          )}
 
           {/* Search form card */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm">

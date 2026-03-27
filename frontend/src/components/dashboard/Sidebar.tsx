@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/tooltip'
 import { useAppSelector } from '@/lib/store/hooks'
 import type { DashboardRole } from '@/lib/store/slices/roleSlice'
+import { roleHasPermission } from '@/lib/types/roles'
 
 // ─── Nav config ──────────────────────────────────────────────────────────────
 
@@ -39,64 +40,56 @@ interface NavItem {
   label: string
   icon: React.ElementType
   href: string
+  permission: string
 }
 
 interface NavGroup {
   label: string
   items: NavItem[]
-  minRole?: DashboardRole
-}
-
-const ROLE_RANK: Record<DashboardRole, number> = {
-  applicant: 0,
-  officer: 1,
-  admin: 2,
 }
 
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'OVERVIEW',
-    items: [{ label: 'Home', icon: LayoutDashboard, href: '/dashboard/home' }],
+    items: [{ label: 'Home', icon: LayoutDashboard, href: '/dashboard/home', permission: 'home' }],
   },
   {
     label: 'SERVICES',
     items: [
-      { label: 'Global Search & Verify', icon: Search, href: '/dashboard/search' },
-      { label: 'Complaints', icon: MessageSquareWarning, href: '/dashboard/complaints' },
-      { label: 'Licensing & Spectrum', icon: FileText, href: '/dashboard/licensing' },
-      { label: 'Type Approval', icon: ShieldCheck, href: '/dashboard/type-approval' },
-      { label: 'Device Verification & IMEI', icon: Smartphone, href: '/dashboard/device-verification' },
-      { label: 'Certificates & Registers', icon: Award, href: '/dashboard/certificates' },
-      { label: 'Payments & Billing', icon: CreditCard, href: '/dashboard/payments' },
+      { label: 'Global Search & Verify', icon: Search, href: '/dashboard/search', permission: 'search' },
+      { label: 'Complaints', icon: MessageSquareWarning, href: '/dashboard/complaints', permission: 'complaints' },
+      { label: 'Licensing & Spectrum', icon: FileText, href: '/dashboard/licensing', permission: 'licensing' },
+      { label: 'Type Approval', icon: ShieldCheck, href: '/dashboard/type-approval', permission: 'type-approval' },
+      { label: 'Device Verification & IMEI', icon: Smartphone, href: '/dashboard/device-verification', permission: 'device-verification' },
+      { label: 'Certificates & Registers', icon: Award, href: '/dashboard/certificates', permission: 'certificates' },
+      { label: 'Payments & Billing', icon: CreditCard, href: '/dashboard/payments', permission: 'payments' },
     ],
   },
   {
     label: 'INTELLIGENCE',
     items: [
-      { label: 'QoS & Coverage', icon: BarChart3, href: '/dashboard/qos' },
-      { label: 'Domain Services', icon: Globe, href: '/dashboard/domain-services' },
-      { label: 'Cybersecurity & CIRT', icon: Lock, href: '/dashboard/cybersecurity' },
-      { label: 'Documents & Policies', icon: BookOpen, href: '/dashboard/documents' },
+      { label: 'QoS & Coverage', icon: BarChart3, href: '/dashboard/qos', permission: 'qos' },
+      { label: 'Domain Services', icon: Globe, href: '/dashboard/domain-services', permission: 'domain-services' },
+      { label: 'Cybersecurity & CIRT', icon: Lock, href: '/dashboard/cybersecurity', permission: 'cybersecurity' },
+      { label: 'Documents & Policies', icon: BookOpen, href: '/dashboard/documents', permission: 'documents' },
     ],
   },
   {
     label: 'SUPPORT',
     items: [
-      { label: 'Notifications', icon: Bell, href: '/dashboard/notifications' },
+      { label: 'Notifications', icon: Bell, href: '/dashboard/notifications', permission: 'notifications' },
     ],
   },
   {
     label: 'ADMIN',
-    minRole: 'officer',
     items: [
-      { label: 'Admin & Workflow', icon: Settings, href: '/dashboard/admin' },
+      { label: 'Admin & Workflow', icon: Settings, href: '/dashboard/admin', permission: 'admin' },
     ],
   },
   {
     label: 'SYSTEM',
-    minRole: 'admin',
     items: [
-      { label: 'Integrations', icon: PlugZap, href: '/dashboard/integrations' },
+      { label: 'Integrations', icon: PlugZap, href: '/dashboard/integrations', permission: 'integrations' },
     ],
   },
 ]
@@ -104,6 +97,7 @@ const NAV_GROUPS: NavGroup[] = [
 const ROLE_CONFIG: Record<DashboardRole, { label: string; dot: string }> = {
   applicant: { label: 'Applicant', dot: 'bg-sky-400' },
   officer: { label: 'Officer', dot: 'bg-emerald-400' },
+  type_approver: { label: 'Type Approver', dot: 'bg-amber-400' },
   admin: { label: 'Admin', dot: 'bg-rose-400' },
 }
 
@@ -119,9 +113,12 @@ export default function Sidebar({ collapsed, onToggleCollapse, onClose }: Sideba
   const pathname = usePathname()
   const role = useAppSelector((s) => s.role.role)
 
-  const visibleGroups = NAV_GROUPS.filter(
-    (g) => !g.minRole || ROLE_RANK[role] >= ROLE_RANK[g.minRole]
-  )
+  const visibleGroups = NAV_GROUPS
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => roleHasPermission(role, item.permission)),
+    }))
+    .filter((group) => group.items.length > 0)
 
   async function handleSignOut() {
     await fetch('/api/auth/logout', { method: 'POST' })

@@ -10,17 +10,21 @@ import {
   Bot,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useAppSelector } from '@/lib/store/hooks'
+import { roleHasPermission } from '@/lib/types/roles'
 
 const NAV_ITEMS = [
-  { label: 'Home',         icon: LayoutDashboard,     href: '/dashboard/home' },
-  { label: 'Search',       icon: Search,               href: '/dashboard/search' },
-  { label: 'Complaints',   icon: MessageSquareWarning, href: '/dashboard/complaints' },
-  { label: 'Type Approval',icon: ShieldCheck,          href: '/dashboard/type-approval' },
-  { label: 'AI Agent',     icon: Bot,                  href: '/dashboard/agent' },
+  { label: 'Home', icon: LayoutDashboard, href: '/dashboard/home', permission: 'home' },
+  { label: 'Search', icon: Search, href: '/dashboard/search', permission: 'search' },
+  { label: 'Complaints', icon: MessageSquareWarning, href: '/dashboard/complaints', permission: 'complaints' },
+  { label: 'Type Approval', icon: ShieldCheck, href: '/dashboard/type-approval', permission: 'type-approval' },
+  { label: 'AI Agent', icon: Bot, href: '/dashboard/agent', permission: 'agent' },
 ]
 
 export default function MobileBottomNav() {
   const pathname = usePathname()
+  const role = useAppSelector((s) => s.role.role)
+  const visibleItems = NAV_ITEMS.filter((item) => roleHasPermission(role, item.permission))
 
   return (
     <nav
@@ -28,7 +32,7 @@ export default function MobileBottomNav() {
       className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 safe-area-inset-bottom"
     >
       <div className="flex h-16">
-        {NAV_ITEMS.map(({ label, icon: Icon, href }) => {
+        {visibleItems.map(({ label, icon: Icon, href }) => {
           const isActive = pathname === href || pathname.startsWith(href + '/')
           return (
             <Link

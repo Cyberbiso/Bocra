@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { Role } from '@/lib/types/roles'
 
-export type DashboardRole = 'applicant' | 'officer' | 'admin'
+export type DashboardRole = Role
 
 interface RoleStore {
   role: DashboardRole

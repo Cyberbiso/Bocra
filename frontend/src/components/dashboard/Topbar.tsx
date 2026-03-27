@@ -16,16 +16,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useAppSelector } from '@/lib/store/hooks'
+import { ROLE_LABELS } from '@/lib/types/roles'
 import logoImage from './../../../public/logo.png'
 
 interface TopbarProps {
   onMobileMenuOpen: () => void
-}
-
-const ROLE_LABELS: Record<string, string> = {
-  applicant: 'Applicant / Requestor',
-  officer: 'BOCRA Officer',
-  admin: 'Administrator',
 }
 
 export default function Topbar({ onMobileMenuOpen }: TopbarProps) {

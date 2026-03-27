@@ -11,6 +11,7 @@
 const BACKEND_URL = process.env.BOCRA_API_URL ?? 'http://localhost:8000'
 
 export const BACKEND_SESSION_COOKIE = 'bocra-session'
+export const FRONTEND_SESSION_COOKIE = 'bocra-auth'
 
 export type BackendFetchInit = RequestInit & {
   /** Forward these incoming request headers (typically from NextRequest.headers) */
@@ -27,9 +28,16 @@ export async function backendFetch(
 ): Promise<Response> {
   const url = `${BACKEND_URL}${path}`
   const headers = new Headers(init.headers)
+  const cookieHeader = headers.get('cookie')
+  const sessionToken =
+    extractNamedCookie(cookieHeader, BACKEND_SESSION_COOKIE) ??
+    extractNamedCookie(cookieHeader, FRONTEND_SESSION_COOKIE)
 
   if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
+  }
+  if (sessionToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${sessionToken}`)
   }
 
   return fetch(url, {
@@ -40,10 +48,14 @@ export async function backendFetch(
 
 /** Extract the bocra-session cookie value from a Cookie header string. */
 export function extractSessionCookie(cookieHeader: string | null): string | null {
+  return extractNamedCookie(cookieHeader, BACKEND_SESSION_COOKIE)
+}
+
+function extractNamedCookie(cookieHeader: string | null, cookieName: string): string | null {
   if (!cookieHeader) return null
   const match = cookieHeader
     .split(';')
     .map((c) => c.trim())
-    .find((c) => c.startsWith(`${BACKEND_SESSION_COOKIE}=`))
-  return match ? match.slice(BACKEND_SESSION_COOKIE.length + 1) : null
+    .find((c) => c.startsWith(`${cookieName}=`))
+  return match ? match.slice(cookieName.length + 1) : null
 }

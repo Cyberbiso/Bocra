@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server'
 import { randomBytes } from 'crypto'
 import bcrypt from 'bcryptjs'
 import { getSupabaseAdmin } from '@/lib/supabase'
+import {
+  AUTH_SESSION_COOKIE,
+  DEMO_LOGIN_USERS,
+  DEMO_PASSWORD,
+} from '@/lib/server-auth'
+import { isRole } from '@/lib/types/roles'
 
 export const runtime = 'nodejs'
-
-// Demo password for seed users whose password_hash is null (auth_provider: 'supabase')
-const DEMO_PASSWORD = 'bocra2026'
 
 // Session duration: 24 hours
 const SESSION_SECONDS = 60 * 60 * 24
@@ -73,7 +76,8 @@ export async function POST(request: Request) {
           .select('role_code')
           .eq('id', userRole.role_id)
           .limit(1)
-        roleCode = roles?.[0]?.role_code ?? 'applicant'
+        const dbRole = roles?.[0]?.role_code
+        roleCode = isRole(dbRole) ? dbRole : 'applicant'
       }
 
       if (orgId) {
@@ -129,21 +133,20 @@ export async function POST(request: Request) {
     }
   }
 
-  // ── Demo fallback (no Supabase) ─────────────────────────────────────────────
-  const DEMO_USERS: Record<string, { role: string; firstName: string; lastName: string; token: string }> = {
-    'applicant@bocra.demo': { role: 'applicant', firstName: 'Naledi',  lastName: 'Molefe', token: 'demo-session-applicant' },
-    'officer@bocra.demo':   { role: 'officer',   firstName: 'Tebogo',  lastName: 'Kgosi',  token: 'demo-session-officer'   },
-    'admin@bocra.demo':     { role: 'admin',      firstName: 'Kabelo',  lastName: 'Mosweu', token: 'demo-session-admin'     },
-  }
-
-  const demoUser = DEMO_USERS[email.toLowerCase()]
-  if (demoUser && password === DEMO_PASSWORD) {
-    const { token, ...userFields } = demoUser
-    const response = NextResponse.json({ success: true, user: { email, ...userFields } })
-    response.cookies.set('bocra-auth', token, {
-      httpOnly: true, sameSite: 'lax', path: '/', maxAge: SESSION_SECONDS,
-    })
-    return response
+  // ── Demo fallback (non-production only) ────────────────────────────────────
+  if (process.env.NODE_ENV !== 'production') {
+    const demoUser = DEMO_LOGIN_USERS[email.toLowerCase()]
+    if (demoUser && password === DEMO_PASSWORD) {
+      const { token, ...userFields } = demoUser
+      const response = NextResponse.json({ success: true, user: { email, ...userFields } })
+      response.cookies.set(AUTH_SESSION_COOKIE, token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: SESSION_SECONDS,
+      })
+      return response
+    }
   }
 
   return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })

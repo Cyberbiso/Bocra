@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,6 +65,15 @@ class Settings(BaseSettings):
         default="https://dqos.bocra.org.bw/api/chartdata",
         alias="DQOS_CHARTDATA_URL",
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        # Render and some hosted providers expose Postgres URLs with the legacy
+        # postgres:// scheme, while SQLAlchemy expects postgresql://.
+        if isinstance(value, str) and value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql://", 1)
+        return value
 
     @property
     def origins(self) -> list[str]:

@@ -23,6 +23,8 @@ _DEMO_TOKEN_EMAILS: dict[str, str] = {
     "demo-session-admin": "admin@bocra.demo",
     "demo-session": "applicant@bocra.demo",
 }
+_DEMO_EMAILS = frozenset(_DEMO_TOKEN_EMAILS.values())
+_DEMO_PASSWORDS = frozenset({"bocra2026", "Password123!"})
 
 
 @dataclass(slots=True)
@@ -42,15 +44,21 @@ class AuthService:
     # ── Login ──────────────────────────────────────────────────────────────
 
     def login(self, email: str, password: str) -> LoginResult | None:
-        user = self.repo.get_user_by_email(email)
-        result = self.supabase.password_sign_in(email, password) if self.supabase.enabled else None
+        normalized_email = email.strip().lower()
+        user = self.repo.get_user_by_email(normalized_email)
+        result = self.supabase.password_sign_in(normalized_email, password) if self.supabase.enabled else None
 
         if result and "access_token" in result:
             access_token = result["access_token"]
             sb_user = result.get("user", {})
-            user = self._sync_profile(sb_user, email)
+            user = self._sync_profile(sb_user, normalized_email)
         else:
-            if not user or not verify_password(password, user.password_hash):
+            demo_password_valid = (
+                settings.allow_demo_auth
+                and normalized_email in _DEMO_EMAILS
+                and password in _DEMO_PASSWORDS
+            )
+            if not user or (not demo_password_valid and not verify_password(password, user.password_hash)):
                 return None
             session = SessionToken(token=new_session_token(), user_id=user.id, expires_at=session_expires_at())
             self.repo.create_session(session)
@@ -74,8 +82,8 @@ class AuthService:
     # ── Token validation ───────────────────────────────────────────────────
 
     def get_user_from_token(self, access_token: str) -> LoginResult | None:
-        # 0. Recognise frontend demo tokens (non-production only)
-        if settings.app_env != "production" and access_token in _DEMO_TOKEN_EMAILS:
+        # 0. Recognise frontend demo tokens when demo auth is enabled.
+        if settings.allow_demo_auth and access_token in _DEMO_TOKEN_EMAILS:
             email = _DEMO_TOKEN_EMAILS[access_token]
             user = self.repo.get_user_by_email(email)
             if user:

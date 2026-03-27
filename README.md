@@ -129,6 +129,15 @@ The app will be available at **http://localhost:3000**.
 
 Visit `http://localhost:3000` — the frontend will communicate with the backend at `http://localhost:8000`.
 
+### Demo sign-in
+
+Use the seeded demo accounts for walkthroughs and judging:
+
+- `admin@bocra.demo` / `bocra2026`
+- `officer@bocra.demo` / `bocra2026`
+- `approver@bocra.demo` / `bocra2026`
+- `applicant@bocra.demo` / `bocra2026`
+
 ---
 
 ## Environment Variables
@@ -143,6 +152,7 @@ Visit `http://localhost:3000` — the frontend will communicate with the backend
 | `SEED_DEMO_DATA`          | Seed sample data on startup          | `false`                                  |
 | `LOCAL_AUTH_SALT`          | Salt for session encryption          | *(set a long random string)*             |
 | `SESSION_TTL_HOURS`       | Session duration                     | `24`                                     |
+| `ALLOW_DEMO_AUTH`         | Keep seeded demo accounts enabled    | `true`                                   |
 | `ALLOWED_ORIGINS`         | CORS origins (comma-separated)       | `http://localhost:3000`                  |
 | `GOOGLE_API_KEY`          | Google Gemini API key                | *(required for AI features)*             |
 | `GOOGLE_AI_MODEL`         | AI model name                        | `gemini-2.5-flash`                       |

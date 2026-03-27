@@ -2,7 +2,8 @@ import { getSupabaseAdmin } from '@/lib/supabase'
 import { isRole, type Role } from '@/lib/types/roles'
 
 export const AUTH_SESSION_COOKIE = 'bocra-auth'
-export const DEMO_PASSWORD = 'bocra2026'
+export const DEMO_PASSWORDS = ['bocra2026', 'Password123!'] as const
+export const DEMO_PASSWORD = DEMO_PASSWORDS[0]
 
 interface OrganisationSummary {
   id: string
@@ -107,12 +108,31 @@ export const DEMO_LOGIN_USERS: Record<
   },
 }
 
-export function isDemoSessionToken(token: string | null | undefined): boolean {
-  return typeof token === 'string' && token.startsWith('demo-session')
+export function normalizeAuthEmail(email: string): string {
+  return email.trim().toLowerCase()
 }
 
-function allowDemoAuth(): boolean {
-  return process.env.NODE_ENV !== 'production'
+export function getDemoLoginUser(email: string | null | undefined) {
+  if (!email) return undefined
+  return DEMO_LOGIN_USERS[normalizeAuthEmail(email)]
+}
+
+export function isDemoPassword(password: string): boolean {
+  return DEMO_PASSWORDS.includes(password as (typeof DEMO_PASSWORDS)[number])
+}
+
+export function allowDemoAuth(): boolean {
+  const explicitSetting = process.env.ALLOW_DEMO_AUTH?.toLowerCase()
+  if (explicitSetting === 'false') return false
+  if (explicitSetting === 'true') return true
+
+  // Keep the seeded demo accounts available for judging and local demos unless
+  // the deployment explicitly opts out.
+  return true
+}
+
+export function isDemoSessionToken(token: string | null | undefined): boolean {
+  return typeof token === 'string' && token.startsWith('demo-session')
 }
 
 export function extractCookieValue(cookieHeader: string | null, cookieName: string): string | null {

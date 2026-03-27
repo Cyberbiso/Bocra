@@ -2,8 +2,6 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useAppDispatch } from '@/lib/store/hooks'
-import { submitRegistration } from '@/lib/store/slices/typeApprovalSlice'
 import Image from 'next/image'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -24,6 +22,7 @@ import { cn } from '@/lib/utils'
 const step2Schema = z.object({
   account_type: z.string().min(1, 'Account type is required'),
   org_name: z.string().min(2, 'Organisation name is required'),
+  registration_number: z.string().optional(),
   org_contact: z.string().min(5, 'Organisation contact is required'),
   org_web: z.string().optional(),
   first_name: z.string().min(1, 'First name is required'),
@@ -36,6 +35,11 @@ const step2Schema = z.object({
   postal_address: z.string().optional(),
   city: z.string().min(1, 'City is required'),
   country: z.string().min(1, 'Country is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  confirm_password: z.string().min(8, 'Please confirm your password'),
+}).refine((data) => data.password === data.confirm_password, {
+  path: ['confirm_password'],
+  message: 'Passwords do not match',
 })
 
 const step3Schema = z.object({
@@ -209,15 +213,39 @@ function RequestorDetailsStep({
         <h3 className="text-sm font-bold text-gray-700 mb-3 pb-2 border-b border-gray-100">
           Account Information
         </h3>
-        <div>
-          <FieldLabel required>Account Type</FieldLabel>
-          <select {...register('account_type')} className={selectCls} defaultValue="">
-            <option value="" disabled>Select account type…</option>
-            {ACCOUNT_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-          <FieldError message={errors.account_type?.message} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <FieldLabel required>Account Type</FieldLabel>
+            <select {...register('account_type')} className={selectCls} defaultValue="">
+              <option value="" disabled>Select account type…</option>
+              {ACCOUNT_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+            <FieldError message={errors.account_type?.message} />
+          </div>
+          <div>
+            <FieldLabel required>Create Password</FieldLabel>
+            <input
+              {...register('password')}
+              type="password"
+              autoComplete="new-password"
+              className={inputCls}
+              placeholder="At least 8 characters"
+            />
+            <FieldError message={errors.password?.message} />
+          </div>
+          <div className="sm:col-span-2">
+            <FieldLabel required>Confirm Password</FieldLabel>
+            <input
+              {...register('confirm_password')}
+              type="password"
+              autoComplete="new-password"
+              className={inputCls}
+              placeholder="Re-enter your password"
+            />
+            <FieldError message={errors.confirm_password?.message} />
+          </div>
         </div>
       </div>
 
@@ -231,6 +259,11 @@ function RequestorDetailsStep({
             <FieldLabel required>Organisation Name</FieldLabel>
             <input {...register('org_name')} className={inputCls} placeholder="e.g. TechImport Botswana (Pty) Ltd" />
             <FieldError message={errors.org_name?.message} />
+          </div>
+          <div>
+            <FieldLabel>Company Registration Number</FieldLabel>
+            <input {...register('registration_number')} className={inputCls} placeholder="e.g. BW2026/00123" />
+            <FieldError message={errors.registration_number?.message} />
           </div>
           <div>
             <FieldLabel required>Organisation Contact</FieldLabel>
@@ -345,9 +378,13 @@ function RequestorDetailsStep({
 function TermsStep({
   onSubmit: onFormSubmit,
   onBack,
+  error,
+  submitting = false,
 }: {
   onSubmit: () => void
   onBack: () => void
+  error?: string
+  submitting?: boolean
 }) {
   const {
     control,
@@ -423,11 +460,17 @@ function TermsStep({
       {errors.accepted_terms && (
         <p className="text-xs text-red-500 -mt-2">{errors.accepted_terms.message}</p>
       )}
+      {error && (
+        <p className="text-sm text-red-600 bg-red-50 px-4 py-3 rounded-xl border border-red-100">
+          {error}
+        </p>
+      )}
 
       <div className="flex justify-between pt-2">
         <button
           type="button"
           onClick={onBack}
+          disabled={submitting}
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -435,9 +478,10 @@ function TermsStep({
         </button>
         <button
           type="submit"
-          className="flex items-center gap-2 px-6 py-2.5 bg-[#06193e] hover:bg-[#027ac6] text-white text-sm font-bold rounded-xl transition-colors"
+          disabled={submitting}
+          className="flex items-center gap-2 px-6 py-2.5 bg-[#06193e] hover:bg-[#027ac6] text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          Submit Registration
+          {submitting ? 'Creating Account…' : 'Submit Registration'}
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
@@ -454,10 +498,11 @@ function SuccessState({ orgName }: { orgName: string }) {
         <CheckCircle2 className="w-8 h-8 text-emerald-500" />
       </div>
       <div>
-        <h2 className="text-xl font-bold text-gray-900">Registration Submitted</h2>
+        <h2 className="text-xl font-bold text-gray-900">Account Created</h2>
         <p className="text-sm text-gray-500 mt-2 max-w-sm mx-auto">
-          <span className="font-semibold text-gray-700">{orgName}</span> has been registered.
-          BOCRA will review your application and send confirmation to your email address.
+          Your portal account is now active, and{' '}
+          <span className="font-semibold text-gray-700">{orgName}</span> has been submitted for
+          BOCRA review.
         </p>
       </div>
       <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -482,31 +527,50 @@ function SuccessState({ orgName }: { orgName: string }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function RegisterPage() {
-  const dispatch = useAppDispatch()
   const [step, setStep] = useState(0)
   const [formData, setFormData] = useState<Partial<Step2Form>>({})
   const [submitted, setSubmitted] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   function handleSaveData(data: Step2Form) {
     setFormData(data)
   }
 
   async function handleSubmit() {
-    await dispatch(submitRegistration({
-      orgName: formData.org_name,
-      contactFirstName: formData.first_name,
-      contactLastName: formData.last_name,
-      email: formData.email,
-      phone: formData.phone,
-      accountType: formData.account_type,
-      idType: formData.id_type,
-      idNumber: formData.id_number,
-      physicalAddress: formData.physical_address,
-      postalAddress: formData.postal_address,
-      city: formData.city,
-      country: formData.country,
-    }))
-    setSubmitted(true)
+    setSubmitting(true)
+    setSubmitError('')
+
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          firstName: formData.first_name,
+          lastName: formData.last_name,
+          phone: formData.phone,
+          nationalId: formData.id_number,
+          orgName: formData.org_name,
+          accountType: formData.account_type,
+          tradingName: null,
+          registrationNumber: formData.registration_number,
+        }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setSubmitError((payload as { error?: string }).error || 'Registration failed. Please try again.')
+        return
+      }
+
+      setSubmitted(true)
+    } catch {
+      setSubmitError('Unable to connect. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -563,6 +627,8 @@ export default function RegisterPage() {
                 <TermsStep
                   onSubmit={handleSubmit}
                   onBack={() => setStep(1)}
+                  error={submitError}
+                  submitting={submitting}
                 />
               )}
             </div>

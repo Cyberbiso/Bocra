@@ -1,20 +1,22 @@
 import { NextResponse } from 'next/server'
-import { randomBytes } from 'crypto'
 import bcrypt from 'bcryptjs'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import {
   AUTH_SESSION_COOKIE,
   allowDemoAuth,
+  buildSessionUser,
+  createPortalSession,
+  ensureApplicantRole,
+  ensurePortalUser,
   getDemoLoginUser,
+  getPortalUserByEmail,
   isDemoPassword,
   normalizeAuthEmail,
+  SESSION_SECONDS,
+  signInWithSupabasePassword,
 } from '@/lib/server-auth'
-import { isRole } from '@/lib/types/roles'
 
 export const runtime = 'nodejs'
-
-// Session duration: 24 hours
-const SESSION_SECONDS = 60 * 60 * 24
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
@@ -33,101 +35,60 @@ export async function POST(request: Request) {
   // ── Supabase path ───────────────────────────────────────────────────────────
   if (supabase) {
     try {
-      // 1. Look up user by email
-      const { data: users, error: userErr } = await supabase
-        .schema('iam')
-        .from('users')
-        .select('id, email, first_name, last_name, password_hash, auth_provider, status_code')
-        .eq('email', normalizedEmail)
-        .limit(1)
-
-      if (userErr) {
-        throw userErr
+      const portalUser = await getPortalUserByEmail(supabase, normalizedEmail)
+      if (portalUser && (portalUser.status_code === 'INACTIVE' || portalUser.status_code === 'SUSPENDED')) {
+        return NextResponse.json(
+          { error: 'Your account has been disabled. Contact BOCRA support.' },
+          { status: 403 },
+        )
       }
 
-      const user = users?.[0]
-      if (user) {
-        if (user.status_code === 'INACTIVE' || user.status_code === 'SUSPENDED') {
-          return NextResponse.json({ error: 'Your account has been disabled. Contact BOCRA support.' }, { status: 403 })
+      let localPasswordValid = false
+      if (portalUser?.password_hash) {
+        try {
+          localPasswordValid = await bcrypt.compare(password, portalUser.password_hash)
+        } catch {
+          localPasswordValid = false
         }
+      }
 
-        // Support both the seeded Supabase password and the judge/demo password
-        // for the reserved bocra.demo accounts.
-        const passwordValid = user.password_hash
-          ? await bcrypt.compare(password, user.password_hash)
-          : false
-        const demoLoginValid = demoAuthAllowed && !!demoUser && demoPasswordValid
+      const authUser = localPasswordValid ? null : await signInWithSupabasePassword(normalizedEmail, password)
+      if (localPasswordValid || authUser) {
+        const metadata = authUser?.user_metadata ?? {}
+        const syncedUser = await ensurePortalUser(supabase, {
+          id: authUser?.id,
+          email: normalizedEmail,
+          firstName:
+            (typeof metadata.first_name === 'string' && metadata.first_name) ||
+            portalUser?.first_name ||
+            normalizedEmail.split('@')[0],
+          lastName:
+            (typeof metadata.last_name === 'string' && metadata.last_name) ||
+            portalUser?.last_name ||
+            '',
+          phone: portalUser?.phone_e164 ?? null,
+          nationalId: portalUser?.national_id ?? null,
+          authProvider: authUser ? 'supabase' : portalUser?.auth_provider ?? 'local',
+          emailVerifiedAt: authUser?.email_confirmed_at ?? undefined,
+          statusCode: portalUser?.status_code ?? 'ACTIVE',
+        })
 
-        if (!passwordValid && !demoLoginValid) {
-          return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
-        }
+        await ensureApplicantRole(supabase, syncedUser.id)
+        const { token } = await createPortalSession(supabase, syncedUser.id)
+        const sessionUser = await buildSessionUser(supabase, syncedUser)
 
-        // 3. Get role + org via user_roles → roles + organizations
-        const { data: userRoles } = await supabase
-          .schema('iam')
-          .from('user_roles')
-          .select('role_id, organization_id')
-          .eq('user_id', user.id)
-          .or('effective_to.is.null,effective_to.gt.' + new Date().toISOString())
-          .order('effective_from', { ascending: false })
-          .limit(1)
-
-        const userRole = userRoles?.[0]
-        let roleCode = 'applicant'
-        const orgId: string | null = userRole?.organization_id ?? null
-        let orgName: string | null = null
-
-        if (userRole?.role_id) {
-          const { data: roles } = await supabase
-            .schema('iam')
-            .from('roles')
-            .select('role_code')
-            .eq('id', userRole.role_id)
-            .limit(1)
-          const dbRole = roles?.[0]?.role_code
-          roleCode = isRole(dbRole) ? dbRole : 'applicant'
-        }
-
-        if (orgId) {
-          const { data: orgs } = await supabase
-            .schema('iam')
-            .from('organizations')
-            .select('legal_name')
-            .eq('id', orgId)
-            .limit(1)
-          orgName = orgs?.[0]?.legal_name ?? null
-        }
-
-        // 4. Create session
-        const token = randomBytes(32).toString('hex')
-        const expiresAt = new Date(Date.now() + SESSION_SECONDS * 1000).toISOString()
-
-        await supabase
-          .schema('iam')
-          .from('sessions')
-          .insert({ user_id: user.id, token, expires_at: expiresAt })
-
-        // 5. Update last_login_at
         await supabase
           .schema('iam')
           .from('users')
           .update({ last_login_at: new Date().toISOString() })
-          .eq('id', user.id)
+          .eq('id', syncedUser.id)
 
         const response = NextResponse.json({
           success: true,
-          user: {
-            id: user.id,
-            email: user.email,
-            firstName: user.first_name,
-            lastName: user.last_name,
-            role: roleCode,
-            orgId,
-            orgName,
-          },
+          user: sessionUser,
         })
 
-        response.cookies.set('bocra-auth', token, {
+        response.cookies.set(AUTH_SESSION_COOKIE, token, {
           httpOnly: true,
           sameSite: 'lax',
           path: '/',
@@ -135,6 +96,11 @@ export async function POST(request: Request) {
         })
 
         return response
+      }
+
+      const demoLoginValid = demoAuthAllowed && !!demoUser && demoPasswordValid
+      if (!demoLoginValid) {
+        return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
       }
     } catch (err) {
       console.error('Login error', err)

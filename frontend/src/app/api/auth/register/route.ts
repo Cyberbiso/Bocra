@@ -1,19 +1,39 @@
 import { NextResponse } from 'next/server'
-import { randomBytes } from 'crypto'
-import bcrypt from 'bcryptjs'
 import { getSupabaseAdmin } from '@/lib/supabase'
+import {
+  AUTH_SESSION_COOKIE,
+  buildSessionUser,
+  createPortalSession,
+  createSupabaseAuthUser,
+  deleteSupabaseAuthUser,
+  ensureApplicantRole,
+  ensurePortalUser,
+  getPortalUserByEmail,
+  normalizeAuthEmail,
+  SESSION_SECONDS,
+} from '@/lib/server-auth'
 
 export const runtime = 'nodejs'
 
-const SESSION_SECONDS = 60 * 60 * 24
-
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
-  const { email, password, firstName, lastName, phone, nationalId } = body ?? {}
+  const {
+    email,
+    password,
+    firstName,
+    lastName,
+    phone,
+    nationalId,
+    orgName,
+    accountType,
+    tradingName,
+    registrationNumber,
+  } = body ?? {}
+  const normalizedEmail = typeof email === 'string' ? normalizeAuthEmail(email) : ''
 
-  if (!email || !password || !firstName || !lastName) {
+  if (!normalizedEmail || !password || !firstName || !lastName || !orgName) {
     return NextResponse.json(
-      { error: 'email, password, firstName and lastName are required.' },
+      { error: 'email, password, firstName, lastName and orgName are required.' },
       { status: 400 },
     )
   }
@@ -25,91 +45,103 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdmin()
 
   if (supabase) {
-    try {
-      // Check if email already exists
-      const { data: existing } = await supabase
-        .schema('iam')
-        .from('users')
-        .select('id')
-        .eq('email', email.toLowerCase().trim())
-        .limit(1)
+    let createdAuthUserId: string | null = null
+    let createdOrgId: string | null = null
+    let createdPortalUserId: string | null = null
 
-      if (existing?.length) {
+    try {
+      const existingUser = await getPortalUserByEmail(supabase, normalizedEmail)
+      if (existingUser) {
         return NextResponse.json({ error: 'An account with this email already exists.' }, { status: 409 })
       }
 
-      // Hash password
-      const passwordHash = await bcrypt.hash(password, 12)
+      const authUser = await createSupabaseAuthUser({
+        email: normalizedEmail,
+        password,
+        firstName,
+        lastName,
+      })
 
-      // Insert user
-      const { data: newUsers, error: insertErr } = await supabase
-        .schema('iam')
-        .from('users')
-        .insert({
-          email: email.toLowerCase().trim(),
-          password_hash: passwordHash,
-          auth_provider: 'local',
-          first_name: firstName,
-          last_name: lastName,
-          phone_e164: phone ?? null,
-          national_id: nationalId ?? null,
-          status_code: 'ACTIVE',
-        })
-        .select('id, email, first_name, last_name')
-
-      if (insertErr || !newUsers?.length) {
-        console.error('User insert error', insertErr)
+      if (!authUser) {
         return NextResponse.json({ error: 'Registration failed. Please try again.' }, { status: 500 })
       }
+      createdAuthUserId = authUser.id
 
-      const user = newUsers[0]
-
-      // Assign applicant role
-      const { data: roles } = await supabase
+      const { data: orgs, error: orgErr } = await supabase
         .schema('iam')
-        .from('roles')
+        .from('organizations')
+        .insert({
+          legal_name: orgName,
+          trading_name: tradingName ?? null,
+          org_type_code: accountType ?? 'PRIVATE_COMPANY',
+          registration_number: registrationNumber ?? null,
+          tax_number: null,
+          status_code: 'PENDING_REVIEW',
+        })
         .select('id')
-        .eq('role_code', 'applicant')
         .limit(1)
 
-      if (roles?.length) {
-        await supabase.schema('iam').from('user_roles').insert({
-          user_id: user.id,
-          role_id: roles[0].id,
-          organization_id: null,
-          effective_from: new Date().toISOString(),
-        })
+      if (orgErr || !orgs?.length) {
+        throw orgErr ?? new Error('Organisation creation failed.')
       }
+      createdOrgId = orgs[0].id
 
-      // Create session
-      const token = randomBytes(32).toString('hex')
-      const expiresAt = new Date(Date.now() + SESSION_SECONDS * 1000).toISOString()
-      await supabase.schema('iam').from('sessions').insert({
-        user_id: user.id,
-        token,
-        expires_at: expiresAt,
+      const portalUser = await ensurePortalUser(supabase, {
+        id: authUser.id,
+        email: normalizedEmail,
+        firstName,
+        lastName,
+        phone: phone ?? null,
+        nationalId: nationalId ?? null,
+        authProvider: 'supabase',
+        emailVerifiedAt: authUser.email_confirmed_at ?? new Date().toISOString(),
+        statusCode: 'ACTIVE',
       })
+      createdPortalUserId = portalUser.id
+
+      await ensureApplicantRole(supabase, portalUser.id, createdOrgId)
+      const { token } = await createPortalSession(supabase, portalUser.id)
+      const sessionUser = await buildSessionUser(supabase, portalUser)
+
+      await supabase
+        .schema('iam')
+        .from('users')
+        .update({ last_login_at: new Date().toISOString() })
+        .eq('id', portalUser.id)
 
       const response = NextResponse.json({
         success: true,
-        user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.first_name,
-          lastName: user.last_name,
-          role: 'applicant',
-          orgId: null,
-          orgName: null,
+        user: sessionUser,
+        organization: {
+          id: createdOrgId,
+          name: orgName,
+          status: 'PENDING_REVIEW',
         },
       }, { status: 201 })
 
-      response.cookies.set('bocra-auth', token, {
+      response.cookies.set(AUTH_SESSION_COOKIE, token, {
         httpOnly: true, sameSite: 'lax', path: '/', maxAge: SESSION_SECONDS,
       })
 
       return response
     } catch (err) {
       console.error('Register error', err)
+
+      if (createdPortalUserId && createdPortalUserId === createdAuthUserId) {
+        await supabase.schema('iam').from('users').delete().eq('id', createdPortalUserId)
+      }
+      if (createdOrgId) {
+        await supabase.schema('iam').from('organizations').delete().eq('id', createdOrgId)
+      }
+      if (createdAuthUserId) {
+        await deleteSupabaseAuthUser(createdAuthUserId)
+      }
+
+      const message = err instanceof Error ? err.message : ''
+      if (/already exists|already registered|duplicate/i.test(message)) {
+        return NextResponse.json({ error: 'An account with this email already exists.' }, { status: 409 })
+      }
+
       return NextResponse.json({ error: 'Registration failed. Please try again.' }, { status: 500 })
     }
   }

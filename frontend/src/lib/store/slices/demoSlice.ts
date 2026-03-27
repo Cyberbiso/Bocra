@@ -5,7 +5,7 @@ interface DemoState {
 }
 
 const initialState: DemoState = {
-  isDemo: true,
+  isDemo: false,
 }
 
 const demoSlice = createSlice({

@@ -20,6 +20,7 @@ import {
   PlugZap,
   ChevronLeft,
   ChevronRight,
+  LogOut,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -29,8 +30,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { useAppSelector, useAppDispatch } from '@/lib/store/hooks'
-import { toggleDemo } from '@/lib/store/slices/demoSlice'
+import { useAppSelector } from '@/lib/store/hooks'
 import type { DashboardRole } from '@/lib/store/slices/roleSlice'
 
 // ─── Nav config ──────────────────────────────────────────────────────────────
@@ -118,8 +118,6 @@ interface SidebarProps {
 export default function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) {
   const pathname = usePathname()
   const role = useAppSelector((s) => s.role.role)
-  const isDemo = useAppSelector((s) => s.demo.isDemo)
-  const dispatch = useAppDispatch()
 
   const visibleGroups = NAV_GROUPS.filter(
     (g) => !g.minRole || ROLE_RANK[role] >= ROLE_RANK[g.minRole]
@@ -258,40 +256,30 @@ export default function Sidebar({ collapsed, onToggleCollapse, onClose }: Sideba
         {/* Divider */}
         <div className="mx-3 mb-3 border-t border-white/10 shrink-0" />
 
-        {/* ── Demo Mode Toggle ──────────────────────────────────────────── */}
-        {!collapsed && (
-          <div className="px-3 pb-2 shrink-0">
+        {/* ── Sign Out ─────────────────────────────────────────────────── */}
+        <div className={cn('px-3 pb-2 shrink-0', collapsed && 'px-2')}>
+          {collapsed ? (
+            <Tooltip>
+              <TooltipTrigger
+                onClick={() => void handleSignOut()}
+                className="flex w-full items-center justify-center rounded-lg p-2.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                aria-label="Sign out"
+              >
+                <LogOut className="h-5 w-5" />
+              </TooltipTrigger>
+              <TooltipContent side="right">Sign out</TooltipContent>
+            </Tooltip>
+          ) : (
             <button
               type="button"
-              onClick={() => dispatch(toggleDemo())}
-              aria-pressed={isDemo ? "true" : "false"}
-              className={cn(
-                'w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-                isDemo
-                  ? 'bg-amber-400/20 text-amber-300'
-                  : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
-              )}
+              onClick={() => void handleSignOut()}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
             >
-              <span>Demo Mode</span>
-              {/* Inline toggle track */}
-              <span
-                aria-hidden="true"
-                className={cn(
-                  'relative inline-flex h-4 w-7 shrink-0 rounded-full border border-white/20 transition-colors',
-                  isDemo ? 'bg-amber-400' : 'bg-white/20'
-                )}
-              >
-                <span
-                  className={cn(
-                    'absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform',
-                    isDemo ? 'translate-x-3' : 'translate-x-0.5'
-                  )}
-                />
-              </span>
+              <LogOut className="h-4 w-4" />
+              <span>Sign out</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* ── Role indicator ────────────────────────────────────────────── */}
         <div className={cn('p-3 shrink-0', collapsed && 'flex justify-center')}>

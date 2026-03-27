@@ -23,6 +23,59 @@ const LAYERS = [
   { id: 'btc', label: 'BTC', color: '#46a33e' },
 ]
 
+type SupportedGeometry = Extract<Geometry, { type: 'Polygon' | 'MultiPolygon' }>
+
+function isPosition(value: unknown): value is [number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    typeof value[0] === 'number' &&
+    Number.isFinite(value[0]) &&
+    typeof value[1] === 'number' &&
+    Number.isFinite(value[1])
+  )
+}
+
+function isLinearRing(value: unknown): value is [number, number][] {
+  return Array.isArray(value) && value.length >= 4 && value.every(isPosition)
+}
+
+function isPolygonCoordinates(value: unknown): value is [number, number][][] {
+  return Array.isArray(value) && value.length > 0 && value.every(isLinearRing)
+}
+
+function isMultiPolygonCoordinates(value: unknown): value is [number, number][][][] {
+  return Array.isArray(value) && value.length > 0 && value.every(isPolygonCoordinates)
+}
+
+function extractGeometry(value: unknown): SupportedGeometry | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const candidate = value as { type?: string; geometry?: unknown; coordinates?: unknown }
+
+  if (candidate.type === 'Feature') {
+    return extractGeometry(candidate.geometry)
+  }
+
+  if (candidate.type === 'Polygon' && isPolygonCoordinates(candidate.coordinates)) {
+    return {
+      type: 'Polygon',
+      coordinates: candidate.coordinates,
+    }
+  }
+
+  if (candidate.type === 'MultiPolygon' && isMultiPolygonCoordinates(candidate.coordinates)) {
+    return {
+      type: 'MultiPolygon',
+      coordinates: candidate.coordinates,
+    }
+  }
+
+  return null
+}
+
 function qosColor(score: number) {
   if (score >= 85) return '#22c55e'
   if (score >= 70) return '#f59e0b'
@@ -42,13 +95,18 @@ export default function QoSMap({ locations, scores }: QoSMapProps) {
 
   const featureCollection = useMemo<FeatureCollection>(() => ({
     type: 'FeatureCollection',
-    features: locations
-      .filter((loc) => loc.area_feature != null)
-      .map((loc) => ({
-        type: 'Feature' as const,
+    features: locations.reduce<Feature[]>((features, loc) => {
+      const geometry = extractGeometry(loc.area_feature)
+      if (!geometry) return features
+
+      features.push({
+        type: 'Feature',
         properties: { id: loc.id, name: loc.name, scores: scores[loc.id] ?? {} },
-        geometry: loc.area_feature as unknown as Geometry,
-      })),
+        geometry,
+      })
+
+      return features
+    }, []),
   }), [locations, scores])
 
   const hasFeatures = featureCollection.features.length > 0

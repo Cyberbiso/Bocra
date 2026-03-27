@@ -23,7 +23,7 @@ import organisationsReducer from './slices/organisationsSlice'
 const persistConfig = {
   key: 'bocra-root',
   storage,
-  whitelist: ['role', 'demo', 'notifications'],
+  whitelist: ['role', 'notifications'],
 }
 
 const rootReducer = combineReducers({

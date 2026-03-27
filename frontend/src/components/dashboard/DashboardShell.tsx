@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
 import MobileBottomNav from './MobileBottomNav'
-import DemoModeBanner from './DemoModeBanner'
 import { DashboardChatPanel } from './DashboardChatPanel'
 import {
   Sheet,
@@ -14,6 +13,7 @@ import {
 } from '@/components/ui/sheet'
 import { useAppDispatch } from '@/lib/store/hooks'
 import { fetchMe } from '@/lib/store/slices/authSlice'
+import { disableDemo } from '@/lib/store/slices/demoSlice'
 import { setRole } from '@/lib/store/slices/roleSlice'
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -22,6 +22,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   const dispatch = useAppDispatch()
 
   useEffect(() => {
+    dispatch(disableDemo())
     dispatch(fetchMe()).then((action) => {
       if (fetchMe.fulfilled.match(action)) {
         const role = action.payload.role
@@ -34,9 +35,6 @@ export default function DashboardShell({ children }: { children: React.ReactNode
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
-
-      {/* ── Demo mode banner ──────────────────────────────────────────── */}
-      <DemoModeBanner />
 
       {/* ── Full-width topbar ─────────────────────────────────────────── */}
       <Topbar onMobileMenuOpen={() => setMobileOpen(true)} />

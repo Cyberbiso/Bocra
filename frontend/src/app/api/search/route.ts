@@ -110,6 +110,30 @@ function mapLicenceStatus(code: string): LicenceResult['status'] {
   return map[code?.toUpperCase()] ?? 'Active'
 }
 
+function mapTAStatus(code: string): TypeApprovalResult['status'] {
+  const map: Record<string, TypeApprovalResult['status']> = {
+    APPROVED: 'Approved',
+    ACTIVE: 'Approved',
+    PENDING: 'Pending',
+    UNDER_REVIEW: 'Pending',
+    MORE_INFO: 'Pending',
+    REJECTED: 'Rejected',
+    REVOKED: 'Rejected',
+  }
+  return map[code?.toUpperCase()] ?? 'Approved'
+}
+
+function mapOrgStatus(code: string): OrganizationResult['status'] {
+  const map: Record<string, OrganizationResult['status']> = {
+    ACTIVE: 'Active',
+    APPROVED: 'Active',
+    INACTIVE: 'Inactive',
+    SUSPENDED: 'Suspended',
+    PENDING: 'Inactive',
+  }
+  return map[code?.toUpperCase()] ?? 'Active'
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl
   const q = (searchParams.get('q') ?? '').trim()

@@ -48,7 +48,7 @@ import { Badge } from '@/components/ui/badge'
 // ─── Application types ────────────────────────────────────────────────────────
 
 type AppStatus = 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'MORE_INFO'
-type AccreditationType = 'Customer' | 'Manufacturer' | 'Repair Provider'
+type AccreditationType = string
 
 interface TAApplication {
   id: string
@@ -145,16 +145,50 @@ const STATUS_CONFIG: Record<AppStatus, { label: string; icon: React.ElementType;
   MORE_INFO:    { label: 'More Info Req.', icon: AlertCircle,   badge: 'bg-blue-100 text-blue-700 border-blue-200',         dot: 'bg-blue-500'    },
 }
 
-const ACRED_ICON: Record<AccreditationType, React.ElementType> = {
-  Customer:          User,
-  Manufacturer:      Building2,
-  'Repair Provider': Smartphone,
+const ACCREDITATION_META = {
+  CUSTOMER: { label: 'Customer', icon: User },
+  MANUFACTURER: { label: 'Manufacturer', icon: Building2 },
+  REPAIR_SERVICE_PROVIDER: { label: 'Repair Service Provider', icon: Smartphone },
+} satisfies Record<string, { label: string; icon: React.ElementType }>
+
+const ACCREDITATION_TYPE_ALIASES: Record<string, keyof typeof ACCREDITATION_META> = {
+  CUSTOMER: 'CUSTOMER',
+  MANUFACTURER: 'MANUFACTURER',
+  REPAIR_PROVIDER: 'REPAIR_SERVICE_PROVIDER',
+  REPAIR_SERVICE_PROVIDER: 'REPAIR_SERVICE_PROVIDER',
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string) {
   try { return format(new Date(iso), 'dd MMM yyyy') } catch { return iso }
+}
+
+function toTitleCase(value: string) {
+  return value
+    .toLowerCase()
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function getAccreditationMeta(accreditationType?: string) {
+  if (!accreditationType) {
+    return { label: 'Unknown', icon: FileText }
+  }
+
+  const normalized = accreditationType.trim().replace(/[\s-]+/g, '_').toUpperCase()
+  const canonical = ACCREDITATION_TYPE_ALIASES[normalized]
+
+  if (canonical) {
+    return ACCREDITATION_META[canonical]
+  }
+
+  return {
+    label: toTitleCase(normalized),
+    icon: FileText,
+  }
 }
 
 // ─── Small shared components ──────────────────────────────────────────────────
@@ -320,7 +354,7 @@ export default function TypeApprovalPage() {
     reference: a.application_number,
     brand: a.brand ?? a.application_number.split('-')[0] ?? '',
     model: a.model ?? '',
-    accreditationType: (a.accreditation_type ?? 'Customer') as AccreditationType,
+    accreditationType: a.accreditation_type ?? 'UNKNOWN',
     submitted: a.submitted_at ? a.submitted_at.slice(0, 10) : '',
     status: (a.current_status_code ?? 'PENDING') as AppStatus,
     requestor: a.applicant_org?.legal_name,
@@ -534,7 +568,7 @@ export default function TypeApprovalPage() {
                       {accreditations.length > 0 && (
                         <>{' · '}Accredited as:{' '}
                         <span className="font-medium text-gray-700">
-                          {accreditations.map((a) => a.accreditation_type).join(', ')}
+                          {accreditations.map((a) => getAccreditationMeta(a.accreditation_type).label).join(', ')}
                         </span></>
                       )}
                     </p>
@@ -647,7 +681,7 @@ export default function TypeApprovalPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {allApplications.map((app) => {
-                      const Icon = ACRED_ICON[app.accreditationType]
+                      const { icon: Icon, label } = getAccreditationMeta(app.accreditationType)
                       return (
                         <tr key={app.id} className="hover:bg-gray-50 transition-colors group">
                           <td className="px-5 py-3.5 font-mono text-xs text-[#003580] font-medium whitespace-nowrap">{app.reference}</td>
@@ -657,7 +691,7 @@ export default function TypeApprovalPage() {
                           </td>
                           <td className="px-5 py-3.5">
                             <span className="inline-flex items-center gap-1.5 text-xs text-gray-600">
-                              <Icon className="w-3.5 h-3.5 text-gray-400" />{app.accreditationType}
+                              <Icon className="w-3.5 h-3.5 text-gray-400" />{label}
                             </span>
                           </td>
                           {isStaff && <td className="px-5 py-3.5 text-xs text-gray-600">{app.requestor}</td>}
@@ -1020,10 +1054,10 @@ export default function TypeApprovalPage() {
                   <div className="flex flex-wrap gap-1.5">
                     {accreditations.length > 0
                       ? accreditations.map((a) => (
-                          <span key={a.id} className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200">{a.accreditation_type}</span>
+                          <span key={a.id} className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200">{getAccreditationMeta(a.accreditation_type).label}</span>
                         ))
                       : MOCK_REGISTRATION.accreditationTypes.map((t) => (
-                          <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200">{t}</span>
+                          <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200">{getAccreditationMeta(t).label}</span>
                         ))
                     }
                   </div>
@@ -1046,7 +1080,7 @@ export default function TypeApprovalPage() {
                           <div className="flex items-center gap-3 min-w-0">
                             <div className={cn('w-2 h-2 rounded-full shrink-0', isActive ? 'bg-emerald-500' : 'bg-slate-400')} />
                             <div className="min-w-0">
-                              <p className="text-sm font-medium text-gray-900 truncate">{a.accreditation_type}</p>
+                              <p className="text-sm font-medium text-gray-900 truncate">{getAccreditationMeta(a.accreditation_type).label}</p>
                               <p className="text-xs text-gray-400 font-mono">{a.accreditation_ref}</p>
                             </div>
                           </div>

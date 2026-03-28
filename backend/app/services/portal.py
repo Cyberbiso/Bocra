@@ -1133,6 +1133,95 @@ class TypeApprovalService:
         self.db.commit()
         return {"workflow": workflow, "application": application}
 
+    def list_user_applications(self, user: User, *, is_officer: bool = False) -> list[dict[str, Any]]:
+        """Return all TYPE_APPROVAL workflow applications for a user (or all if officer)."""
+        workflows = self.workflow_repo.list_applications(
+            user_id=None if is_officer else user.id
+        )
+        ta_workflows = [w for w in workflows if w.application_type_code == "TYPE_APPROVAL"]
+        results = []
+        for workflow in ta_workflows:
+            ta = self.device_repo.get_ta_application_by_workflow_id(workflow.id)
+            device = self.device_repo.get_device(ta.device_model_id) if ta else None
+            results.append({
+                "id": workflow.id,
+                "applicationNumber": workflow.application_number,
+                "title": workflow.title,
+                "status": workflow.current_status_code,
+                "stage": workflow.current_stage_code,
+                "submittedAt": workflow.submitted_at.isoformat() if workflow.submitted_at else None,
+                "expectedDecisionAt": workflow.expected_decision_at.isoformat() if workflow.expected_decision_at else None,
+                "device": {
+                    "brand": device.brand_name,
+                    "model": device.model_name,
+                    "type": device.device_type,
+                } if device else None,
+            })
+        return results
+
+    def get_application_detail(self, application_id: str, user: User, *, is_officer: bool = False) -> dict[str, Any] | None:
+        """Return full detail for a single TYPE_APPROVAL application including events, invoice, certificate."""
+        workflow = self.workflow_repo.get_application(application_id)
+        if not workflow or workflow.application_type_code != "TYPE_APPROVAL":
+            return None
+        # Applicants may only see their own
+        if not is_officer and workflow.applicant_user_id != user.id:
+            return None
+
+        ta = self.device_repo.get_ta_application_by_workflow_id(workflow.id)
+        device = self.device_repo.get_device(ta.device_model_id) if ta else None
+        events = self.workflow_repo.list_events_for_resource("type_approval_application", workflow.id)
+        billing_repo = BillingRepository(self.db)
+        cert_repo = CertificateRepository(self.db)
+        invoice = billing_repo.get_invoice_by_application_id(workflow.id)
+        certificate = cert_repo.get_by_application_id(workflow.id)
+
+        return {
+            "id": workflow.id,
+            "applicationNumber": workflow.application_number,
+            "title": workflow.title,
+            "status": workflow.current_status_code,
+            "stage": workflow.current_stage_code,
+            "submittedAt": workflow.submitted_at.isoformat() if workflow.submitted_at else None,
+            "expectedDecisionAt": workflow.expected_decision_at.isoformat() if workflow.expected_decision_at else None,
+            "device": {
+                "brand": device.brand_name,
+                "model": device.model_name,
+                "type": device.device_type,
+                "simEnabled": device.is_sim_enabled,
+            } if device else None,
+            "formData": ta.form_data_json if ta else {},
+            "events": [
+                {
+                    "id": e.id,
+                    "eventType": e.event_type_code,
+                    "label": e.label,
+                    "actorName": e.actor_name,
+                    "actorRole": e.actor_role,
+                    "comment": e.comment,
+                    "occurredAt": e.occurred_at.isoformat() if e.occurred_at else None,
+                }
+                for e in events
+            ],
+            "invoice": {
+                "id": invoice.id,
+                "invoiceNumber": invoice.invoice_number,
+                "totalAmount": float(invoice.total_amount),
+                "currency": invoice.currency_code,
+                "dueDate": invoice.due_date.isoformat() if invoice.due_date else None,
+                "status": invoice.status_code,
+            } if invoice else None,
+            "certificate": {
+                "id": certificate.id,
+                "certificateNumber": certificate.certificate_number,
+                "issueDate": certificate.issue_date.isoformat() if certificate.issue_date else None,
+                "expiryDate": certificate.expiry_date.isoformat() if certificate.expiry_date else None,
+                "status": certificate.status_code,
+                "qrToken": certificate.qr_token,
+                "holderName": certificate.holder_name,
+            } if certificate else None,
+        }
+
     def add_comment(
         self,
         reference: str,
@@ -1341,7 +1430,7 @@ class TypeApprovalService:
         officer: User,
         note: str = "",
     ) -> WorkflowApplication | None:
-        """Perform validate / approve / reject / remand / issue_certificate on a type approval application."""
+        """Perform validate / approve / reject / remand / confirm_payment / issue_certificate on a type approval application."""
         result = self._resolve_application(application_id)
         if result:
             type_application, workflow, device = result
@@ -1356,12 +1445,18 @@ class TypeApprovalService:
         if workflow.application_type_code != "TYPE_APPROVAL":
             return None
 
+        # validate: PENDING → VALIDATED
+        # approve: VALIDATED → APPROVED (issues invoice, payment pending)
+        # confirm_payment: APPROVED → CERTIFICATE_ISSUED (issues cert)
+        # reject: any → REJECTED
+        # remand: any → PENDING/REMANDED
         action_map = {
-            "validate": ("VALIDATED", "VALIDATED", "Application Validated"),
-            "approve": ("APPROVED", "INVOICE_PENDING", "Application Approved"),
-            "issue_certificate": ("CERTIFICATE_ISSUED", "ISSUED", "Certificate Issued"),
-            "reject": ("REJECTED", "REJECTED", "Application Rejected"),
-            "remand": ("REMANDED", "REMANDED", "Application Remanded"),
+            "validate":          ("VALIDATED",          "VALIDATED",          "Application Validated"),
+            "approve":           ("APPROVED",           "PAYMENT_PENDING",    "Application Approved — Invoice Issued"),
+            "confirm_payment":   ("CERTIFICATE_ISSUED", "CERTIFICATE_ISSUED", "Payment Confirmed — Certificate Issued"),
+            "issue_certificate": ("CERTIFICATE_ISSUED", "ISSUED",             "Certificate Issued"),
+            "reject":            ("REJECTED",           "REJECTED",           "Application Rejected"),
+            "remand":            ("PENDING",            "REMANDED",           "Application Remanded"),
         }
         if action not in action_map:
             raise ValueError(f"Unsupported action: {action}")
@@ -1478,7 +1573,7 @@ class TypeApprovalService:
                 )
             )
 
-        if action == "issue_certificate":
+        if action in {"issue_certificate", "confirm_payment"}:
             invoices = self.billing_repo.list_invoices_for_application(workflow.id)
             if invoices and any(invoice.status_code not in {"PAID", "COMPLETED"} for invoice in invoices):
                 raise ValueError("Type approval invoice must be paid before issuing a certificate.")
@@ -1519,6 +1614,12 @@ class TypeApprovalService:
                 record.approval_date = _utcnow().date()
                 self.db.add(record)
             self.db.flush()
+            # Mark invoice paid if one exists
+            billing_repo = BillingRepository(self.db)
+            invoice = billing_repo.get_invoice_by_application_id(workflow.id)
+            if invoice:
+                invoice.status_code = "PAID"
+                self.db.flush()
 
         self.workflow_repo.create_event(
             WorkflowEvent(
@@ -1539,7 +1640,7 @@ class TypeApprovalService:
                     user_id=workflow.applicant_user_id,
                     channel_code="IN_APP",
                     title=label,
-                    body=f"Your type approval application {workflow.application_number} has been {new_status.lower()}.",
+                    body=f"Your type approval application {workflow.application_number}: {label.lower()}.",
                     status_code="SENT",
                     sent_at=_utcnow(),
                     source_table="workflow.applications",

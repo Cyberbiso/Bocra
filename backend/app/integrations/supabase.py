@@ -140,6 +140,33 @@ class SupabaseAuthAdapter:
         except httpx.RequestError as exc:
             logger.warning("Supabase sign_out failed: %s", exc)
 
+    def admin_get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        """Look up an existing Supabase user by email via the Admin API."""
+        if not self.enabled or not settings.supabase_service_role_key:
+            return None
+        try:
+            response = httpx.get(
+                f"{settings.supabase_url}/auth/v1/admin/users",
+                params={"email": email},
+                headers={
+                    "apikey": settings.supabase_service_role_key,
+                    "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                },
+                timeout=15.0,
+            )
+            if response.is_success:
+                data = response.json()
+                users = data.get("users", [])
+                # API may not filter server-side — match by email client-side
+                for u in users:
+                    if u.get("email", "").lower() == email.lower():
+                        return u
+                return None
+            logger.warning("admin_get_user_by_email %s: %s", response.status_code, response.text)
+        except httpx.RequestError as exc:
+            logger.error("admin_get_user_by_email failed: %s", exc)
+        return None
+
     def admin_create_user(
         self,
         email: str,

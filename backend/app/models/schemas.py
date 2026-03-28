@@ -63,6 +63,15 @@ class TypeApprovalDocumentReviewCreate(BaseModel):
     note: str | None = ""
 
 
+class ExternalSystemCreate(BaseModel):
+    systemCode: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    description: str | None = None
+    baseUrl: str = Field(min_length=1)
+    healthEndpoint: str = "/health"
+    contactEmail: str | None = None
+
+
 class PaymentCreate(BaseModel):
     invoiceId: str
     method: Literal["mobile_money", "bank_transfer", "card"]

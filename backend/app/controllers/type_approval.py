@@ -92,6 +92,7 @@ def accreditation_status(
     return present_accreditation(TypeApprovalService(db).get_accreditation(user, accreditation_type))
 
 
+
 @router.post("/api/type-approval/applications")
 def create_type_approval_application(
     payload: TypeApprovalApplicationCreate,
@@ -105,6 +106,7 @@ def create_type_approval_application(
     return {
         "applicationNumber": result["workflow"].application_number,
         "status": result["workflow"].current_status_code,
+        "id": result["workflow"].id,
     }
 
 
@@ -115,6 +117,7 @@ async def officer_type_approval_action(
     user: User = Depends(require_type_approver_or_admin),
     db: Session = Depends(db_session),
 ):
+    """Officer actions: validate | approve | confirm_payment | reject | remand"""
     body = await request.json()
     action = str(body.get("action", "")).strip().lower()
     note = str(body.get("note", "")).strip()
@@ -127,7 +130,7 @@ async def officer_type_approval_action(
     if not workflow:
         raise HTTPException(status_code=404, detail="Application not found")
     db.commit()
-    return {"success": True, "applicationNumber": workflow.application_number, "status": workflow.current_status_code}
+    return {"success": True, "applicationNumber": workflow.application_number, "status": workflow.current_status_code, "stage": workflow.current_stage_code}
 
 
 @router.post("/api/type-approval/applications/{reference}/comments")

@@ -2,11 +2,20 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+import uuid as _uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 import secrets
+
+# Deterministic UUID helper — converts short seed keys like "l1", "c01" into
+# proper UUID strings that are stable across restarts and consistent with FK refs.
+_SEED_NS = _uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+def _sid(key: str) -> str:
+    return str(_uuid.uuid5(_SEED_NS, key))
 
 from app.config import get_settings
 from app.integrations.supabase import SupabaseAuthAdapter
@@ -188,7 +197,9 @@ def seed_database(db: Session) -> None:
     today = date(2026, 3, 24)
     now = datetime(2026, 3, 24, 10, 0, tzinfo=timezone.utc)
 
-    if db.scalar(select(User.id).limit(1)):
+    # Guard: complaint categories are stable reference data inserted early in the seed.
+    # If they exist the seed has already run successfully at least once.
+    if db.scalar(select(ComplaintCategory.id).limit(1)):
         ensure_type_approval_reviewer_setup(db, now)
         ensure_reference_knowledge_documents(db, now)
         db.commit()
@@ -256,14 +267,16 @@ def seed_database(db: Session) -> None:
 
     users: dict[str, User] = {}
     for key, email, first_name, last_name, phone, national_id in _SEED_ACCOUNTS:
+        # Try to create the user in Supabase; if they already exist, look them up.
         sb = supabase.admin_create_user(
             email,
             _SEED_PASSWORD,
             email_confirm=True,
             metadata={"first_name": first_name, "last_name": last_name},
         )
-        # Use Supabase UUID as user ID so token validation syncs correctly.
-        # Fall back to a fresh UUID if Supabase is unavailable (local dev without keys).
+        if sb is None:
+            sb = supabase.admin_get_user_by_email(email)
+        # Use the Supabase UUID so token → user resolution works on login.
         user_id = sb["id"] if sb else None
         user = User(
             **({"id": user_id} if user_id else {}),
@@ -395,15 +408,18 @@ def seed_database(db: Session) -> None:
         ]
     )
 
-    complaint_categories = [
-        ComplaintCategory(category_code="billing", name="Billing Dispute", default_sla_hours=120),
-        ComplaintCategory(category_code="coverage", name="Network Coverage", default_sla_hours=168),
-        ComplaintCategory(category_code="service_quality", name="Service Quality", default_sla_hours=168),
-        ComplaintCategory(category_code="broadcasting", name="Broadcasting", default_sla_hours=240),
-        ComplaintCategory(category_code="postal", name="Postal Services", default_sla_hours=240),
-        ComplaintCategory(category_code="other", name="Other", default_sla_hours=168),
+    _cat_rows = [
+        {"id": str(_uuid.uuid4()), "category_code": "billing", "name": "Billing Dispute", "sector_code": "COMMUNICATIONS", "default_sla_hours": 120},
+        {"id": str(_uuid.uuid4()), "category_code": "coverage", "name": "Network Coverage", "sector_code": "COMMUNICATIONS", "default_sla_hours": 168},
+        {"id": str(_uuid.uuid4()), "category_code": "service_quality", "name": "Service Quality", "sector_code": "COMMUNICATIONS", "default_sla_hours": 168},
+        {"id": str(_uuid.uuid4()), "category_code": "broadcasting", "name": "Broadcasting", "sector_code": "COMMUNICATIONS", "default_sla_hours": 240},
+        {"id": str(_uuid.uuid4()), "category_code": "postal", "name": "Postal Services", "sector_code": "COMMUNICATIONS", "default_sla_hours": 240},
+        {"id": str(_uuid.uuid4()), "category_code": "other", "name": "Other", "sector_code": "COMMUNICATIONS", "default_sla_hours": 168},
     ]
-    db.add_all(complaint_categories)
+    db.execute(
+        pg_insert(ComplaintCategory).values(_cat_rows).on_conflict_do_nothing(index_elements=["category_code"])
+    )
+    complaint_categories = db.scalars(select(ComplaintCategory)).all()
 
     notices = [
         KnowledgeDocument(
@@ -523,7 +539,7 @@ def seed_database(db: Session) -> None:
 
     licence_records = [
         LicenseRecord(
-            id="l1",
+            id=_sid("l1"),
             licence_number="ECN-2019-0031",
             licence_type="Electronic Communications Network",
             category="Telecommunications",
@@ -538,7 +554,7 @@ def seed_database(db: Session) -> None:
             assigned_officer_dept="Licensing & Compliance",
         ),
         LicenseRecord(
-            id="l2",
+            id=_sid("l2"),
             licence_number="ISP-2021-0012",
             licence_type="Internet Service Provider",
             category="Data Services",
@@ -553,7 +569,7 @@ def seed_database(db: Session) -> None:
             assigned_officer_dept="Licensing & Compliance",
         ),
         LicenseRecord(
-            id="l3",
+            id=_sid("l3"),
             licence_number="VSAT-2022-0007",
             licence_type="VSAT Terminal Licence",
             category="Satellite Services",
@@ -567,7 +583,7 @@ def seed_database(db: Session) -> None:
             assigned_officer_dept="Spectrum Management",
         ),
         LicenseRecord(
-            id="l4",
+            id=_sid("l4"),
             licence_number="BRD-2018-0002",
             licence_type="Broadcasting Licence — FM Radio",
             category="Broadcasting",
@@ -581,7 +597,7 @@ def seed_database(db: Session) -> None:
             assigned_officer_dept="Broadcasting",
         ),
         LicenseRecord(
-            id="l5",
+            id=_sid("l5"),
             licence_number="ECS-2020-0044",
             licence_type="Electronic Communications Service",
             category="Telecommunications",
@@ -595,7 +611,7 @@ def seed_database(db: Session) -> None:
             assigned_officer_dept="Licensing & Compliance",
         ),
         LicenseRecord(
-            id="l6",
+            id=_sid("l6"),
             licence_number="POS-2017-0003",
             licence_type="Postal Operator Licence",
             category="Postal Services",
@@ -614,7 +630,7 @@ def seed_database(db: Session) -> None:
 
     licence_applications = [
         LicenseApplication(
-            id="a1",
+            id=_sid("a1"),
             workflow_application_id=workflow_apps["lic_app_1"].id,
             category_code="telecommunications",
             licence_type_name="Spectrum Authorisation",
@@ -623,7 +639,7 @@ def seed_database(db: Session) -> None:
             coverage_area="Nationwide",
         ),
         LicenseApplication(
-            id="a3",
+            id=_sid("a3"),
             workflow_application_id=workflow_apps["lic_app_2"].id,
             category_code="telecommunications",
             licence_type_name="Electronic Communications Service — Amendment",
@@ -632,7 +648,7 @@ def seed_database(db: Session) -> None:
             coverage_area="Nationwide",
         ),
         LicenseApplication(
-            id="a4",
+            id=_sid("a4"),
             workflow_application_id=workflow_apps["lic_app_3"].id,
             category_code="broadcasting",
             licence_type_name="Broadcasting Licence — TV",
@@ -707,7 +723,7 @@ def seed_database(db: Session) -> None:
     db.flush()
 
     type_app = TypeApprovalApplication(
-        id="ta-app-1",
+        id=_sid("ta-app-1"),
         workflow_application_id=workflow_apps["type_app_1"].id,
         device_model_id=devices["router"].id,
         accreditation_id=accreditations[0].id,
@@ -719,7 +735,7 @@ def seed_database(db: Session) -> None:
 
     type_records = [
         TypeApprovalRecord(
-            id="ta1",
+            id=_sid("ta1"),
             device_model_id=devices["samsung_a55"].id,
             application_id=type_app.id,
             status_code="APPROVED",
@@ -727,21 +743,21 @@ def seed_database(db: Session) -> None:
             applicant_name="Samsung Electronics",
         ),
         TypeApprovalRecord(
-            id="ta2",
+            id=_sid("ta2"),
             device_model_id=devices["iphone_15"].id,
             status_code="APPROVED",
             approval_date=today - timedelta(days=535),
             applicant_name="Apple",
         ),
         TypeApprovalRecord(
-            id="ta3",
+            id=_sid("ta3"),
             device_model_id=devices["huawei_p60"].id,
             status_code="REJECTED",
             approval_date=today - timedelta(days=200),
             applicant_name="Huawei Technologies",
         ),
         TypeApprovalRecord(
-            id="ta4",
+            id=_sid("ta4"),
             device_model_id=devices["xiaomi_redmi"].id,
             status_code="PENDING",
             approval_date=today - timedelta(days=6),
@@ -792,7 +808,7 @@ def seed_database(db: Session) -> None:
 
     certificates = [
         Certificate(
-            id="c1",
+            id=_sid("c1"),
             certificate_number="LCN-2024-0031",
             certificate_type="LICENCE",
             holder_name="BotswanaTel Communications (Pty) Ltd",
@@ -804,7 +820,7 @@ def seed_database(db: Session) -> None:
             issued_by="BOCRA Licensing Department",
         ),
         Certificate(
-            id="c2",
+            id=_sid("c2"),
             certificate_number="TA-2023-0142",
             certificate_type="TYPE_APPROVAL",
             holder_name="Samsung Electronics",
@@ -818,7 +834,7 @@ def seed_database(db: Session) -> None:
             issued_by="BOCRA Type Approval Department",
         ),
         Certificate(
-            id="c3",
+            id=_sid("c3"),
             certificate_number="TA-2022-0089",
             certificate_type="TYPE_APPROVAL",
             holder_name="Huawei Technologies",
@@ -831,7 +847,7 @@ def seed_database(db: Session) -> None:
             remarks="This certificate has expired and is no longer valid. A renewal application must be submitted.",
         ),
         Certificate(
-            id="c4",
+            id=_sid("c4"),
             certificate_number="EX-2025-0023",
             certificate_type="EXEMPTION",
             holder_name="Gaborone City Council",
@@ -842,7 +858,7 @@ def seed_database(db: Session) -> None:
             issued_by="BOCRA Spectrum Management Department",
         ),
         Certificate(
-            id="c5",
+            id=_sid("c5"),
             certificate_number="DVC-2024-0307",
             certificate_type="DEVICE_VERIFICATION",
             holder_name="BotswanaTel Communications (Pty) Ltd",
@@ -855,7 +871,7 @@ def seed_database(db: Session) -> None:
             issued_by="BOCRA Type Approval Department",
         ),
         Certificate(
-            id="c6",
+            id=_sid("c6"),
             certificate_number="LCN-2021-0056",
             certificate_type="LICENCE",
             holder_name="Linkserve Botswana (Pty) Ltd",
@@ -867,7 +883,7 @@ def seed_database(db: Session) -> None:
             remarks="Licence suspended pending investigation into service quality non-compliance.",
         ),
         Certificate(
-            id="c7",
+            id=_sid("c7"),
             certificate_number="TA-2025-0098",
             certificate_type="TYPE_APPROVAL",
             holder_name="Xiaomi Inc",
@@ -880,7 +896,7 @@ def seed_database(db: Session) -> None:
             issued_by="BOCRA Type Approval Department",
         ),
         Certificate(
-            id="c8",
+            id=_sid("c8"),
             certificate_number="TA-2020-0014",
             certificate_type="TYPE_APPROVAL",
             holder_name="Motorola Mobility LLC",
@@ -897,7 +913,7 @@ def seed_database(db: Session) -> None:
 
     invoices = [
         Invoice(
-            id="inv1",
+            id=_sid("inv1"),
             invoice_number="INV-2025-0019",
             application_id="APP-2025-00412",
             payer_org_id=organizations["bottel"].id,
@@ -911,7 +927,7 @@ def seed_database(db: Session) -> None:
             status_code="OVERDUE",
         ),
         Invoice(
-            id="inv2",
+            id=_sid("inv2"),
             invoice_number="INV-2024-0187",
             application_id="LCN-2021-0056",
             payer_org_id=organizations["linkserve"].id,
@@ -924,7 +940,7 @@ def seed_database(db: Session) -> None:
             status_code="OVERDUE",
         ),
         Invoice(
-            id="inv3",
+            id=_sid("inv3"),
             invoice_number="INV-2025-0031",
             application_id="APP-2025-00098",
             payer_org_id=organizations["xiaomi"].id,
@@ -938,7 +954,7 @@ def seed_database(db: Session) -> None:
             status_code="UNPAID",
         ),
         Invoice(
-            id="inv4",
+            id=_sid("inv4"),
             invoice_number="INV-2025-0041",
             application_id="EX-2025-0023",
             payer_org_id=organizations["gcc"].id,
@@ -951,7 +967,7 @@ def seed_database(db: Session) -> None:
             status_code="UNPAID",
         ),
         Invoice(
-            id="inv5",
+            id=_sid("inv5"),
             invoice_number="INV-2025-0028",
             application_id="LCN-2024-0031",
             payer_org_id=organizations["bottel"].id,
@@ -970,7 +986,7 @@ def seed_database(db: Session) -> None:
 
     payments = [
         Payment(
-            id="pay1",
+            id=_sid("pay1"),
             invoice_id=invoices[0].id,
             gateway_code="ORANGE_MONEY",
             gateway_reference="OM-20250115-7734",
@@ -979,7 +995,7 @@ def seed_database(db: Session) -> None:
             paid_at=now - timedelta(days=68),
         ),
         Payment(
-            id="pay2",
+            id=_sid("pay2"),
             invoice_id=invoices[2].id,
             gateway_code="BANK_TRANSFER",
             gateway_reference="BTR-20250203-1192",
@@ -988,7 +1004,7 @@ def seed_database(db: Session) -> None:
             paid_at=now - timedelta(days=50),
         ),
         Payment(
-            id="pay3",
+            id=_sid("pay3"),
             invoice_id=invoices[4].id,
             gateway_code="CARD",
             gateway_reference="CARD-20250228-4401",
@@ -997,7 +1013,7 @@ def seed_database(db: Session) -> None:
             paid_at=now - timedelta(days=25),
         ),
         Payment(
-            id="pay4",
+            id=_sid("pay4"),
             invoice_id=invoices[4].id,
             gateway_code="SMEGA",
             gateway_reference="SMG-20250305-9981",
@@ -1006,7 +1022,7 @@ def seed_database(db: Session) -> None:
             paid_at=now - timedelta(days=19),
         ),
         Payment(
-            id="pay5",
+            id=_sid("pay5"),
             invoice_id=invoices[1].id,
             gateway_code="BANK_TRANSFER",
             gateway_reference="BTR-20250310-2250",
@@ -1032,7 +1048,7 @@ def seed_database(db: Session) -> None:
 
     complaints = [
         Complaint(
-            id="c01",
+            id=_sid("c01"),
             complaint_number="CMP-2025-00841",
             complainant_user_id=users["applicant"].id,
             complainant_org_id=organizations["bottel"].id,
@@ -1049,7 +1065,7 @@ def seed_database(db: Session) -> None:
             sla_due_at=now + timedelta(days=1),
         ),
         Complaint(
-            id="c02",
+            id=_sid("c02"),
             complaint_number="CMP-2025-00839",
             complainant_user_id=users["applicant"].id,
             complainant_org_id=organizations["bottel"].id,
@@ -1066,7 +1082,7 @@ def seed_database(db: Session) -> None:
             sla_due_at=now,
         ),
         Complaint(
-            id="c03",
+            id=_sid("c03"),
             complaint_number="CMP-2025-00774",
             complainant_user_id=users["public"].id,
             subject="Postal parcel lost in transit — tracking shows delivered",
@@ -1092,21 +1108,21 @@ def seed_database(db: Session) -> None:
     db.add_all(
         [
             ComplaintAttachment(
-                complaint_id="c01",
+                complaint_id=_sid("c01"),
                 file_name="mascom_reference_screenshot.pdf",
                 content_type="application/pdf",
                 size_bytes=218000,
                 storage_path=complaint_files[0],
             ),
             ComplaintAttachment(
-                complaint_id="c01",
+                complaint_id=_sid("c01"),
                 file_name="no_signal_photo.jpg",
                 content_type="image/jpeg",
                 size_bytes=1400000,
                 storage_path=complaint_files[1],
             ),
             ComplaintAttachment(
-                complaint_id="c02",
+                complaint_id=_sid("c02"),
                 file_name="account_statement_march.pdf",
                 content_type="application/pdf",
                 size_bytes=156000,
@@ -1117,7 +1133,7 @@ def seed_database(db: Session) -> None:
     db.add_all(
         [
             ComplaintMessage(
-                complaint_id="c01",
+                complaint_id=_sid("c01"),
                 author_user_id=users["applicant"].id,
                 author_name="Portal User",
                 author_role="complainant",
@@ -1125,7 +1141,7 @@ def seed_database(db: Session) -> None:
                 created_at=now - timedelta(days=3),
             ),
             ComplaintMessage(
-                complaint_id="c01",
+                complaint_id=_sid("c01"),
                 author_user_id=users["officer"].id,
                 author_name="Officer T. Kgosi",
                 author_role="officer",
@@ -1133,7 +1149,7 @@ def seed_database(db: Session) -> None:
                 created_at=now - timedelta(days=2),
             ),
             ComplaintMessage(
-                complaint_id="c02",
+                complaint_id=_sid("c02"),
                 author_user_id=users["officer"].id,
                 author_name="Officer B. Seretse",
                 author_role="officer",
@@ -1144,17 +1160,17 @@ def seed_database(db: Session) -> None:
     )
 
     workflow_events = [
-        WorkflowEvent(resource_kind="complaint", resource_id="c01", event_type_code="SUBMITTED", label="Submitted", actor_name="System", actor_role="system", comment="Complaint received and assigned case number CMP-2025-00841.", occurred_at=now - timedelta(days=6)),
-        WorkflowEvent(resource_kind="complaint", resource_id="c01", event_type_code="ASSIGNED", label="Assigned", actor_name="Officer T. Kgosi", actor_role="officer", comment="Case assigned to Officer Kgosi in the Network Quality team.", occurred_at=now - timedelta(days=5)),
-        WorkflowEvent(resource_kind="complaint", resource_id="c01", event_type_code="UNDER_REVIEW", label="Under Review", actor_name="Officer T. Kgosi", actor_role="officer", comment="Technical team contacted Mascom for infrastructure report.", occurred_at=now - timedelta(days=4)),
-        WorkflowEvent(resource_kind="complaint", resource_id="c02", event_type_code="SUBMITTED", label="Submitted", actor_name="System", actor_role="system", comment="Complaint received and assigned case number CMP-2025-00839.", occurred_at=now - timedelta(days=7)),
-        WorkflowEvent(resource_kind="complaint", resource_id="c02", event_type_code="PENDING", label="Pending", actor_name="Officer B. Seretse", actor_role="officer", comment="Awaiting billing records from Orange Botswana.", occurred_at=now - timedelta(days=4)),
-        WorkflowEvent(resource_kind="complaint", resource_id="c03", event_type_code="SUBMITTED", label="Submitted", actor_name="System", actor_role="system", comment="Complaint received and assigned case number CMP-2025-00774.", occurred_at=now - timedelta(days=10)),
-        WorkflowEvent(resource_kind="licence_record", resource_id="l1", event_type_code="RENEWAL_REMINDER", label="Renewal reminder dispatched", actor_name="BOCRA System", actor_role="system", comment="Automatic 14-day renewal reminder sent to the holder.", occurred_at=now - timedelta(days=5)),
-        WorkflowEvent(resource_kind="licence_record", resource_id="l1", event_type_code="COMPLIANCE_REPORT", label="Annual compliance report submitted", actor_name="BotswanaTel Communications", actor_role="applicant", comment="Annual compliance report submitted.", occurred_at=now - timedelta(days=60)),
-        WorkflowEvent(resource_kind="licence_application", resource_id="a1", event_type_code="UNDER_REVIEW", label="Under Review", actor_name="Officer K. Mosweu", actor_role="officer", comment="Spectrum authorisation application is under technical review.", occurred_at=now - timedelta(days=2)),
-        WorkflowEvent(resource_kind="licence_application", resource_id="a3", event_type_code="APPROVED", label="Approved", actor_name="Officer K. Mosweu", actor_role="officer", comment="Application approved and certificate queued.", occurred_at=now - timedelta(days=14)),
-        WorkflowEvent(resource_kind="licence_application", resource_id="a4", event_type_code="REJECTED", label="Rejected", actor_name="Officer L. Seretse", actor_role="officer", comment="Application rejected after regulatory review.", occurred_at=now - timedelta(days=24)),
+        WorkflowEvent(resource_kind="complaint", resource_id=_sid("c01"), event_type_code="SUBMITTED", label="Submitted", actor_name="System", actor_role="system", comment="Complaint received and assigned case number CMP-2025-00841.", occurred_at=now - timedelta(days=6)),
+        WorkflowEvent(resource_kind="complaint", resource_id=_sid("c01"), event_type_code="ASSIGNED", label="Assigned", actor_name="Officer T. Kgosi", actor_role="officer", comment="Case assigned to Officer Kgosi in the Network Quality team.", occurred_at=now - timedelta(days=5)),
+        WorkflowEvent(resource_kind="complaint", resource_id=_sid("c01"), event_type_code="UNDER_REVIEW", label="Under Review", actor_name="Officer T. Kgosi", actor_role="officer", comment="Technical team contacted Mascom for infrastructure report.", occurred_at=now - timedelta(days=4)),
+        WorkflowEvent(resource_kind="complaint", resource_id=_sid("c02"), event_type_code="SUBMITTED", label="Submitted", actor_name="System", actor_role="system", comment="Complaint received and assigned case number CMP-2025-00839.", occurred_at=now - timedelta(days=7)),
+        WorkflowEvent(resource_kind="complaint", resource_id=_sid("c02"), event_type_code="PENDING", label="Pending", actor_name="Officer B. Seretse", actor_role="officer", comment="Awaiting billing records from Orange Botswana.", occurred_at=now - timedelta(days=4)),
+        WorkflowEvent(resource_kind="complaint", resource_id=_sid("c03"), event_type_code="SUBMITTED", label="Submitted", actor_name="System", actor_role="system", comment="Complaint received and assigned case number CMP-2025-00774.", occurred_at=now - timedelta(days=10)),
+        WorkflowEvent(resource_kind="licence_record", resource_id=_sid("l1"), event_type_code="RENEWAL_REMINDER", label="Renewal reminder dispatched", actor_name="BOCRA System", actor_role="system", comment="Automatic 14-day renewal reminder sent to the holder.", occurred_at=now - timedelta(days=5)),
+        WorkflowEvent(resource_kind="licence_record", resource_id=_sid("l1"), event_type_code="COMPLIANCE_REPORT", label="Annual compliance report submitted", actor_name="BotswanaTel Communications", actor_role="applicant", comment="Annual compliance report submitted.", occurred_at=now - timedelta(days=60)),
+        WorkflowEvent(resource_kind="licence_application", resource_id=_sid("a1"), event_type_code="UNDER_REVIEW", label="Under Review", actor_name="Officer K. Mosweu", actor_role="officer", comment="Spectrum authorisation application is under technical review.", occurred_at=now - timedelta(days=2)),
+        WorkflowEvent(resource_kind="licence_application", resource_id=_sid("a3"), event_type_code="APPROVED", label="Approved", actor_name="Officer K. Mosweu", actor_role="officer", comment="Application approved and certificate queued.", occurred_at=now - timedelta(days=14)),
+        WorkflowEvent(resource_kind="licence_application", resource_id=_sid("a4"), event_type_code="REJECTED", label="Rejected", actor_name="Officer L. Seretse", actor_role="officer", comment="Application rejected after regulatory review.", occurred_at=now - timedelta(days=24)),
         WorkflowEvent(resource_kind="application", resource_id=workflow_apps["type_app_1"].id, event_type_code="AWAITING_PAYMENT", label="Awaiting Payment", actor_name="System", actor_role="system", comment="Invoice generated and awaiting payment before issuance.", occurred_at=now - timedelta(days=9)),
     ]
     db.add_all(workflow_events)
@@ -1168,7 +1184,7 @@ def seed_database(db: Session) -> None:
             status_code="SENT",
             sent_at=now - timedelta(days=1),
             source_table="billing.invoices",
-            source_id="inv3",
+            source_id=_sid("inv3"),
         ),
         Notification(
             user_id=users["applicant"].id,
@@ -1178,7 +1194,7 @@ def seed_database(db: Session) -> None:
             status_code="SENT",
             sent_at=now - timedelta(days=1),
             source_table="complaints.complaints",
-            source_id="c01",
+            source_id=_sid("c01"),
         ),
     ]
     db.add_all(notifications)
@@ -1186,14 +1202,64 @@ def seed_database(db: Session) -> None:
     # ── External system integrations ──────────────────────────────────────────
     _KNOWN_SYSTEMS = [
         {
-            "system_code": "typeapproval_portal",
-            "name": "Type Approval Portal",
+            "system_code": "typeapproval_bocra",
+            "name": "BOCRA Type Approval Portal",
             "description": "BOCRA Type Approval self-service portal — handles device application submissions and hosts user account registration.",
             "base_url": "https://typeapproval.bocra.org.bw",
             "health_endpoint": "/health",
             "contact_email": "support@bocra.org.bw",
         },
+        {
+            "system_code": "restcountries",
+            "name": "REST Countries",
+            "description": "Country data including telecom country codes, regions, and international dialling prefixes. Used for licensing and international regulatory comparisons.",
+            "base_url": "https://restcountries.com",
+            "health_endpoint": "/v3.1/name/botswana",
+            "contact_email": None,
+        },
+        {
+            "system_code": "iana_rdap",
+            "name": "IANA RDAP",
+            "description": "Internet Assigned Numbers Authority domain registration data protocol. BOCRA relies on IANA for .bw domain registry oversight.",
+            "base_url": "https://rdap.iana.org",
+            "health_endpoint": "/domain/bocra.org.bw",
+            "contact_email": None,
+        },
+        {
+            "system_code": "ripe_stat",
+            "name": "RIPE NCC RIPEstat",
+            "description": "IP address allocation and routing data for Botswana (AS resources). Used by CIRT for network visibility and incident response.",
+            "base_url": "https://stat.ripe.net",
+            "health_endpoint": "/data/country-resource-list/data.json?resource=BW",
+            "contact_email": None,
+        },
+        {
+            "system_code": "ipapi",
+            "name": "IP-API Geolocation",
+            "description": "IP address geolocation and ASN lookup. Supports BOCRA CIRT threat monitoring and cybersecurity incident investigation.",
+            "base_url": "http://ip-api.com",
+            "health_endpoint": "/json/8.8.8.8",
+            "contact_email": None,
+        },
+        {
+            "system_code": "jsonplaceholder",
+            "name": "JSONPlaceholder (Sandbox)",
+            "description": "Open REST API for integration testing and sandbox development. Used by developers building against the BOCRA platform.",
+            "base_url": "https://jsonplaceholder.typicode.com",
+            "health_endpoint": "/posts/1",
+            "contact_email": None,
+        },
     ]
+    # Remove legacy system codes that were renamed
+    _LEGACY_CODES = {"typeapproval_portal"}
+    stale = db.scalars(
+        select(ExternalSystem).where(ExternalSystem.system_code.in_(_LEGACY_CODES))
+    ).all()
+    for s in stale:
+        db.delete(s)
+    if stale:
+        db.flush()
+
     existing_codes = set(
         db.scalars(
             select(ExternalSystem.system_code).where(
